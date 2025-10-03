@@ -15,11 +15,38 @@
 - `satisfactory` - "Satisfactory"
 - `not_functional` - "Not fully functional" (electronics only)
 
-## 3. Colors
+## 3. Colors (Complete List)
 - Multiple colors allowed (typically 1-3)
-- Uses color IDs from Vinted API ontologies
-- Common colors: Black, White, Grey, Red, Blue, Green, Yellow, Orange, Pink, Purple, Brown, Beige
-- **Note**: Exact list requires API ontologies fetch
+- **Available Colors**:
+  - Black
+  - Brown
+  - Grey
+  - Beige
+  - Pink
+  - Purple
+  - Red
+  - Yellow
+  - Blue
+  - Green
+  - Orange
+  - White
+  - Silver
+  - Gold
+  - Multi
+  - Khaki
+  - Turquoise
+  - Cream
+  - Apricot
+  - Coral
+  - Burgundy
+  - Rose
+  - Lilac
+  - Light blue
+  - Navy
+  - Dark green
+  - Mustard
+  - Mint
+  - Clear
 
 ## 4. Materials
 - Up to 3 materials per item
