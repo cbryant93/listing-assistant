@@ -8,12 +8,11 @@
 - **Quality**: Natural daylight, no filters/flash, multiple angles
 
 ## 2. Condition (Fixed Enum Values)
-- `new_with_tags` - "New with tags"
-- `new_without_tags` - "New without tags"
-- `very_good` - "Very good"
-- `good` - "Good"
-- `satisfactory` - "Satisfactory"
-- `not_functional` - "Not fully functional" (electronics only)
+- `new_with_tags` - "New with tags" - A brand-new, unused item with tags attached or in the original packaging
+- `new_without_tags` - "New without tags" - A brand-new, unused item without tags or original packaging
+- `very_good` - "Very good" - A lightly used item that may have slight imperfections, but still looks great
+- `good` - "Good" - A used item that may show imperfections and signs of wear
+- `satisfactory` - "Satisfactory" - A frequently used item with imperfections and signs of wear
 
 ## 3. Colors (Complete List)
 - Multiple colors allowed (typically 1-3)
