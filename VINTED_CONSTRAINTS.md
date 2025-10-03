@@ -48,11 +48,64 @@
   - Mint
   - Clear
 
-## 4. Materials
+## 4. Materials (Complete List)
 - Up to 3 materials per item
-- Uses material IDs from Vinted API ontologies
-- Common: Cotton, Polyester, Wool, Silk, Denim, Leather, Synthetic
-- **Note**: Exact list requires API ontologies fetch
+- **Available Materials**:
+  - Acrylic
+  - Alpaca
+  - Bamboo
+  - Canvas
+  - Cardboard
+  - Cashmere
+  - Ceramic
+  - Chiffon
+  - Corduroy
+  - Cotton
+  - Denim
+  - Down
+  - Elastane
+  - Faux fur
+  - Faux leather
+  - Felt
+  - Flannel
+  - Fleece
+  - Foam
+  - Glass
+  - Gold
+  - Jute
+  - Lace
+  - Latex
+  - Leather
+  - Linen
+  - Merino
+  - Mesh
+  - Metal
+  - Mohair
+  - Neoprene
+  - Nylon
+  - Paper
+  - Patent leather
+  - Plastic
+  - Polyester
+  - Porcelain
+  - Rattan
+  - Rubber
+  - Satin
+  - Sequin
+  - Silicone
+  - Silk
+  - Silver
+  - Steel
+  - Stone
+  - Straw
+  - Suede
+  - Tulle
+  - Tweed
+  - Velour
+  - Velvet
+  - Viscose
+  - Wood
+  - Wool
 
 ## 5. Category
 - Hierarchical structure (Women → Tops → T-shirts)
@@ -82,10 +135,13 @@
 - **Increments**: £0.50 or £1.00 recommended
 - **Note**: Unusually low/high prices may be flagged as auctions
 
-## 10. Parcel Size
+## 10. Parcel Size (Complete List)
 - Required field for shipping
-- Options provided by Vinted based on carrier
-- **Note**: Options require API or manual testing
+- **Available Sizes**:
+  - `small` - "Small" - For items that'd fit in a large envelope
+  - `medium` - "Medium" - For items that'd fit in a shoebox (Recommended)
+  - `large` - "Large" - For items that'd fit in a moving box
+- **Note**: The buyer always pays for postage
 
 ## Validation Strategy for Phase 1
 
