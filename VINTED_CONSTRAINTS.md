@@ -106,11 +106,19 @@
   - Wood
   - Wool
 
-## 5. Category
-- Hierarchical structure (Women → Tops → T-shirts)
-- Gender encoded in root categories (Women, Men, Kids)
+## 5. Category (Hierarchical Structure)
+- **Root Categories (8 main sections)**:
+  - Women
+  - Men
+  - Kids
+  - Home
+  - Electronics
+  - Entertainment
+  - Hobbies & collectables
+  - Sports
+- Hierarchical structure (e.g., Women → Tops → T-shirts)
 - Category-dependent fields (sizes vary by category)
-- **Note**: Full category tree requires API ontologies fetch
+- **Note**: Full subcategory tree would require additional research or API access
 
 ## 6. Size
 - Varies by category and region
