@@ -8,7 +8,7 @@
  * Sign up: https://serpapi.com/
  */
 
-import axios from 'axios';
+import { fetch } from '@tauri-apps/api/http';
 
 export interface ProductData {
   title: string;
@@ -38,17 +38,18 @@ export async function searchGoogleShopping(
   apiKey: string
 ): Promise<ShoppingResult> {
   try {
-    const response = await axios.get('https://serpapi.com/search', {
-      params: {
-        engine: 'google_shopping',
-        q: query,
-        api_key: apiKey,
-        gl: 'uk', // Search from UK
-        hl: 'en', // English language
-      },
-    });
+    const url = new URL('https://serpapi.com/search');
+    url.searchParams.set('engine', 'google_shopping');
+    url.searchParams.set('q', query);
+    url.searchParams.set('api_key', apiKey);
+    url.searchParams.set('gl', 'uk'); // Search from UK
+    url.searchParams.set('hl', 'en'); // English language
+    url.searchParams.set('num', '20'); // Get more results for better RRP estimation
 
-    const products: ProductData[] = (response.data.shopping_results || []).map((result: any) => ({
+    const response = await fetch(url.toString());
+    const data = response.data as any;
+
+    const products: ProductData[] = (data.shopping_results || []).map((result: any) => ({
       title: result.title,
       price: result.extracted_price || result.price,
       link: result.link,
@@ -98,7 +99,7 @@ export async function getProductInfoForAI(
 
 /**
  * Extract RRP (Recommended Retail Price) from Google Shopping
- * Looks for the highest price as an estimate of original retail price
+ * Uses MEDIAN price for more accurate estimation (resistant to outliers)
  */
 export async function getRRP(
   brand: string,
@@ -106,13 +107,13 @@ export async function getRRP(
   apiKey: string
 ): Promise<number | null> {
   try {
-    const result = await searchGoogleShopping(`${brand} ${category} new`, apiKey);
+    const result = await searchGoogleShopping(`${brand} ${category}`, apiKey);
 
     if (result.products.length === 0) {
       return null;
     }
 
-    // Find the highest price (likely closest to RRP for new items)
+    // Get all valid prices
     const prices = result.products
       .map(p => p.extracted_price || p.price)
       .filter((p): p is number => p !== undefined && p > 0);
@@ -121,9 +122,62 @@ export async function getRRP(
       return null;
     }
 
-    return Math.max(...prices);
+    // Return MEDIAN price (more resistant to outliers than max or average)
+    const sortedPrices = [...prices].sort((a, b) => a - b);
+    const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
+
+    return median;
   } catch (error) {
     console.error('Error getting RRP:', error);
+    return null;
+  }
+}
+
+/**
+ * Get comprehensive pricing data from Google Shopping
+ * Returns median, average, min, max prices
+ */
+export async function getPricingData(
+  brand: string,
+  category: string,
+  apiKey: string
+): Promise<{
+  median: number;
+  average: number;
+  min: number;
+  max: number;
+  count: number;
+} | null> {
+  try {
+    const result = await searchGoogleShopping(`${brand} ${category}`, apiKey);
+
+    if (result.products.length === 0) {
+      return null;
+    }
+
+    const prices = result.products
+      .map(p => p.extracted_price || p.price)
+      .filter((p): p is number => p !== undefined && p > 0);
+
+    if (prices.length === 0) {
+      return null;
+    }
+
+    const sortedPrices = [...prices].sort((a, b) => a - b);
+    const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
+    const average = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+
+    return {
+      median,
+      average,
+      min,
+      max,
+      count: prices.length,
+    };
+  } catch (error) {
+    console.error('Error getting pricing data:', error);
     return null;
   }
 }

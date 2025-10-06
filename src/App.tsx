@@ -98,33 +98,62 @@ function App() {
 
       const { calculatePrice } = await import('./services/pricingService');
       const { generateDescription } = await import('./services/aiDescriptionService');
-      const { getMockProductData } = await import('./services/googleShoppingService');
-      const { getMockImageRecognition } = await import('./services/imageRecognitionService');
-      const { getMockReverseImageSearch } = await import('./services/reverseImageSearchService');
+      const { getRRP, getProductInfoForAI } = await import('./services/googleShoppingService');
+      const { analyzeImage } = await import('./services/imageRecognitionService');
 
-      // Step 1: Reverse image search to get exact product (using mock for now)
-      const reverseSearchResults = getMockReverseImageSearch(item.group.primaryPhoto);
-      const topResult = reverseSearchResults[0];
+      // Load image as base64
+      const imageData = await invoke<string>('read_image_as_base64', { filePath: item.group.primaryPhoto });
+      const base64Image = imageData.split(',')[1]; // Remove data:image/jpeg;base64, prefix
 
-      console.log('Reverse image search results:', reverseSearchResults);
+      console.log('Starting auto-fill with image:', item.group.primaryPhoto);
 
-      // Step 2: Analyze photo with Vision API for brand/category (using mock for now)
-      const recognition = getMockImageRecognition(item.group.primaryPhoto);
+      // Step 1: Analyze photo with Vision API for brand/category/labels
+      console.log('Step 1: Calling Google Vision API...');
+      const recognition = await analyzeImage(base64Image, 'AIzaSyBMcOzFdSDZqD2gIHFxihPk_4dgeKS46QU');
+      console.log('Vision API result:', recognition);
 
-      console.log('Image recognition result:', recognition);
-
-      // Use reverse search title if available, otherwise build from Vision API
-      const productTitle = topResult?.title || '';
       const brand = item.listing.brand || recognition.brand || '';
       const category = item.listing.category || recognition.category || '';
 
-      // Step 3: Search Google Shopping for additional product data (for description)
-      const scrapedData = brand && category ? getMockProductData(brand, category) : null;
+      // Build title from Vision API detection
+      let productTitle = '';
+      if (brand && category) {
+        productTitle = `${brand} ${category.charAt(0).toUpperCase() + category.slice(1)}`;
+      } else if (brand && recognition.labels.length > 0) {
+        const topLabel = recognition.labels[0];
+        productTitle = `${brand} ${topLabel.charAt(0).toUpperCase() + topLabel.slice(1)}`;
+      } else if (recognition.labels.length > 0) {
+        productTitle = recognition.labels.slice(0, 2).map(l => l.charAt(0).toUpperCase() + l.slice(1)).join(' ');
+      }
 
-      // Get RRP from reverse search first, then scraped data
+      // Step 2: Get RRP from Google Shopping (median price)
+      console.log('Step 2: Getting RRP from Google Shopping...');
+      let rrpFromShopping = null;
+      if (brand && category) {
+        try {
+          rrpFromShopping = await getRRP(brand, category, 'e0100564fc4f869cb5b7aa5411263e372dfae03fa1e7d214b7b6c98f14b606d5');
+          console.log('RRP from shopping:', rrpFromShopping);
+        } catch (error) {
+          console.error('Error getting RRP:', error);
+        }
+      }
+
+      // Step 3: Get product info for description
+      console.log('Step 3: Getting product details for description...');
+      let scrapedData = null;
+      if (brand && category) {
+        try {
+          scrapedData = await getProductInfoForAI(brand, category, 'e0100564fc4f869cb5b7aa5411263e372dfae03fa1e7d214b7b6c98f14b606d5');
+          console.log('Product info:', scrapedData);
+        } catch (error) {
+          console.error('Error getting product info:', error);
+        }
+      }
+
+      // Use RRP from Google Shopping
       let rrp = item.listing.rrp || 0;
-      if (!rrp && topResult?.price) {
-        rrp = topResult.price;
+      if (!rrp && rrpFromShopping) {
+        rrp = rrpFromShopping;
       } else if (!rrp && scrapedData?.extracted_price) {
         rrp = scrapedData.extracted_price;
       }
