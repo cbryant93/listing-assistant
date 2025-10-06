@@ -18,6 +18,7 @@ function App() {
   const handleUploadPhotos = async () => {
     try {
       setIsProcessing(true);
+      console.log('Opening file picker...');
 
       // Open file picker for multiple photos
       const selected = await open({
@@ -28,26 +29,35 @@ function App() {
         }]
       });
 
+      console.log('Selected files:', selected);
+
       if (!selected || (Array.isArray(selected) && selected.length === 0)) {
+        console.log('No files selected');
         setIsProcessing(false);
         return;
       }
 
       const photoPaths = Array.isArray(selected) ? selected : [selected];
+      console.log('Photo paths:', photoPaths);
 
-      // Import photo grouping service
-      const { groupPhotosByItem } = await import('./services/photoGroupingService');
+      // TODO: Implement photo grouping in Rust backend
+      // For now, create one group with all photos
+      const groups = [{
+        id: 'item-1',
+        photos: photoPaths,
+        primaryPhoto: photoPaths[0],
+        confidence: 1.0,
+      }];
 
-      // Group photos by item
-      const groups = await groupPhotosByItem(photoPaths, 0.75);
+      console.log('Created groups:', groups);
 
       // Create item data for each group
-      const newItems: ItemData[] = groups.map(group => ({
+      const newItems: ItemData[] = groups.map((group, index) => ({
         group,
         listing: {
           title: '',
           description: '',
-          condition: 'very_good',
+          condition: 'very_good' as const,
           colors: [],
           materials: [],
           rrp: 0,
@@ -56,10 +66,13 @@ function App() {
         isExpanded: false,
       }));
 
+      console.log('Created items:', newItems);
       setItems(newItems);
       setIsProcessing(false);
+      console.log('Upload complete!');
     } catch (error) {
       console.error('Error uploading photos:', error);
+      alert('Error uploading photos: ' + (error as Error).message);
       setIsProcessing(false);
     }
   };
@@ -80,40 +93,27 @@ function App() {
     const item = items[index];
 
     try {
-      // Import services
-      const { analyzeClothingLabel } = await import('./services/ocrService');
-      const { generateDescription } = await import('./services/aiDescriptionService');
+      // TODO: Implement OCR and AI services in Rust backend
+      // For now, just calculate price if RRP is provided
       const { calculatePrice } = await import('./services/pricingService');
 
-      // Run OCR on first photo (assumes it has a label)
-      const ocrResult = await analyzeClothingLabel(item.group.primaryPhoto);
-
-      // Generate description
-      const descriptionResult = generateDescription({
-        brand: ocrResult.brand || undefined,
-        condition: item.listing.condition || 'very_good',
-        colors: item.listing.colors,
-        materials: ocrResult.materials,
-      });
-
-      // Calculate price if we have RRP
-      let calculatedPrice = item.listing.price || 0;
-      if (item.listing.rrp) {
-        calculatedPrice = calculatePrice(item.listing.rrp, item.listing.condition || 'very_good');
+      let calculatedPrice = item.listing.price || 10;
+      if (item.listing.rrp && item.listing.rrp > 0) {
+        const priceCalc = calculatePrice(item.listing.rrp, item.listing.condition || 'very_good');
+        calculatedPrice = priceCalc.suggestedPrice;
       }
 
-      // Update listing with auto-filled data
+      // Mock auto-fill for demo
       handleUpdateListing(index, {
-        brand: ocrResult.brand || item.listing.brand,
-        size: ocrResult.size || item.listing.size,
-        materials: ocrResult.materials && ocrResult.materials.length > 0
-          ? ocrResult.materials
-          : item.listing.materials,
-        description: descriptionResult.fullText,
+        title: item.listing.title || 'Auto-filled Item',
+        description: item.listing.description || 'Great condition! Perfect for your wardrobe.\n\n#fashion #style #vintage #preloved #sustainable',
         price: calculatedPrice,
       });
+
+      alert('Auto-fill complete! (Demo mode - OCR and AI coming soon)');
     } catch (error) {
       console.error('Error auto-filling data:', error);
+      alert('Error auto-filling data: ' + (error as Error).message);
     }
   };
 
