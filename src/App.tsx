@@ -94,26 +94,76 @@ function App() {
     const item = items[index];
 
     try {
-      // TODO: Implement OCR and AI services in Rust backend
-      // For now, just calculate price if RRP is provided
-      const { calculatePrice } = await import('./services/pricingService');
+      setIsProcessing(true);
 
+      const { calculatePrice } = await import('./services/pricingService');
+      const { generateDescription } = await import('./services/aiDescriptionService');
+      const { getMockProductData } = await import('./services/googleShoppingService');
+      const { getMockImageRecognition } = await import('./services/imageRecognitionService');
+
+      // Step 1: Analyze first photo to identify brand/category
+      // Use mock for now (replace with actual API when you have key)
+      // const imageData = await invoke<string>('read_image_as_base64', { filePath: item.group.primaryPhoto });
+      // const recognition = await analyzeImage(imageData.split(',')[1], 'YOUR_GOOGLE_VISION_API_KEY');
+      const recognition = getMockImageRecognition(item.group.primaryPhoto);
+
+      const brand = item.listing.brand || recognition.brand || '';
+      const category = item.listing.category || recognition.category || '';
+
+      console.log('Image recognition result:', recognition);
+
+      // Step 2: Search Google Shopping for product data
+      // const scrapedData = await getProductInfoForAI(brand, category, 'YOUR_SERPAPI_KEY');
+      const scrapedData = brand && category ? getMockProductData(brand, category) : null;
+
+      // Get RRP from scraped data if not already set
+      let rrp = item.listing.rrp || 0;
+      if (!rrp && scrapedData?.extracted_price) {
+        rrp = scrapedData.extracted_price;
+      }
+
+      // Calculate price
       let calculatedPrice = item.listing.price || 10;
-      if (item.listing.rrp && item.listing.rrp > 0) {
-        const priceCalc = calculatePrice(item.listing.rrp, item.listing.condition || 'very_good');
+      if (rrp && rrp > 0) {
+        const priceCalc = calculatePrice(rrp, item.listing.condition || 'very_good');
         calculatedPrice = priceCalc.suggestedPrice;
       }
 
-      // Mock auto-fill for demo
-      handleUpdateListing(index, {
-        title: item.listing.title || 'Auto-filled Item',
-        description: item.listing.description || 'Great condition! Perfect for your wardrobe.\n\n#fashion #style #vintage #preloved #sustainable',
-        price: calculatedPrice,
+      // Generate description with scraped data
+      const descriptionResult = generateDescription({
+        brand: brand || undefined,
+        category: category || undefined,
+        size: item.listing.size,
+        condition: item.listing.condition || 'very_good',
+        colors: item.listing.colors,
+        materials: item.listing.materials,
+        scrapedData: scrapedData ? {
+          title: scrapedData.title,
+          description: scrapedData.description,
+          price: scrapedData.extracted_price,
+          rating: scrapedData.rating,
+          reviews: scrapedData.reviews,
+        } : undefined,
       });
 
-      alert('Auto-fill complete! (Demo mode - OCR and AI coming soon)');
+      // Update listing
+      handleUpdateListing(index, {
+        title: item.listing.title || `${brand} ${category}`.trim() || 'Listing',
+        brand: brand || item.listing.brand,
+        category: category || item.listing.category,
+        description: descriptionResult.fullText,
+        price: calculatedPrice,
+        rrp: rrp > 0 ? rrp : undefined,
+      });
+
+      setIsProcessing(false);
+
+      alert('Auto-fill complete! ✨\n\n' +
+        `Detected: ${brand || 'Unknown'} ${category || 'item'}\n` +
+        (scrapedData ? 'Used Google Shopping data for description.' : ''));
     } catch (error) {
       console.error('Error auto-filling data:', error);
+      setIsProcessing(false);
       alert('Error auto-filling data: ' + (error as Error).message);
     }
   };

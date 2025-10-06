@@ -17,6 +17,13 @@ export interface DescriptionInput {
   colors?: string[];
   materials?: string[];
   additionalInfo?: string; // Any extra details scraped or user-provided
+  scrapedData?: {
+    title?: string;
+    description?: string;
+    price?: number;
+    rating?: number;
+    reviews?: number;
+  };
 }
 
 export interface DescriptionOutput {
@@ -39,6 +46,7 @@ export function generateDescription(input: DescriptionInput): DescriptionOutput 
     colors = [],
     materials = [],
     additionalInfo = '',
+    scrapedData,
   } = input;
 
   // Map condition to user-friendly text
@@ -60,6 +68,15 @@ export function generateDescription(input: DescriptionInput): DescriptionOutput 
     parts.push(`${brand} ${category} ${conditionText}${size ? `, size ${size}` : ''}.`);
   }
 
+  // Add scraped product description if available
+  if (scrapedData?.description) {
+    // Extract key features from scraped description (first sentence usually most relevant)
+    const firstSentence = scrapedData.description.split('.')[0];
+    if (firstSentence && firstSentence.length > 20) {
+      parts.push(firstSentence + '.');
+    }
+  }
+
   // Color and material details
   if (colors.length > 0) {
     const colorText = colors.length === 1
@@ -73,6 +90,11 @@ export function generateDescription(input: DescriptionInput): DescriptionOutput 
       ? materials[0]
       : materials.join(', ');
     parts.push(`Made from ${materialText}.`);
+  }
+
+  // Add rating/social proof if available
+  if (scrapedData?.rating && scrapedData?.reviews) {
+    parts.push(`Highly rated (${scrapedData.rating}★ with ${scrapedData.reviews}+ reviews).`);
   }
 
   // Additional info
