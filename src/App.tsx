@@ -100,25 +100,32 @@ function App() {
       const { generateDescription } = await import('./services/aiDescriptionService');
       const { getMockProductData } = await import('./services/googleShoppingService');
       const { getMockImageRecognition } = await import('./services/imageRecognitionService');
+      const { getMockReverseImageSearch } = await import('./services/reverseImageSearchService');
 
-      // Step 1: Analyze first photo to identify brand/category
-      // Use mock for now (replace with actual API when you have key)
-      // const imageData = await invoke<string>('read_image_as_base64', { filePath: item.group.primaryPhoto });
-      // const recognition = await analyzeImage(imageData.split(',')[1], 'YOUR_GOOGLE_VISION_API_KEY');
+      // Step 1: Reverse image search to get exact product (using mock for now)
+      const reverseSearchResults = getMockReverseImageSearch(item.group.primaryPhoto);
+      const topResult = reverseSearchResults[0];
+
+      console.log('Reverse image search results:', reverseSearchResults);
+
+      // Step 2: Analyze photo with Vision API for brand/category (using mock for now)
       const recognition = getMockImageRecognition(item.group.primaryPhoto);
-
-      const brand = item.listing.brand || recognition.brand || '';
-      const category = item.listing.category || recognition.category || '';
 
       console.log('Image recognition result:', recognition);
 
-      // Step 2: Search Google Shopping for product data
-      // const scrapedData = await getProductInfoForAI(brand, category, 'YOUR_SERPAPI_KEY');
+      // Use reverse search title if available, otherwise build from Vision API
+      const productTitle = topResult?.title || '';
+      const brand = item.listing.brand || recognition.brand || '';
+      const category = item.listing.category || recognition.category || '';
+
+      // Step 3: Search Google Shopping for additional product data (for description)
       const scrapedData = brand && category ? getMockProductData(brand, category) : null;
 
-      // Get RRP from scraped data if not already set
+      // Get RRP from reverse search first, then scraped data
       let rrp = item.listing.rrp || 0;
-      if (!rrp && scrapedData?.extracted_price) {
+      if (!rrp && topResult?.price) {
+        rrp = topResult.price;
+      } else if (!rrp && scrapedData?.extracted_price) {
         rrp = scrapedData.extracted_price;
       }
 
@@ -146,9 +153,30 @@ function App() {
         } : undefined,
       });
 
+      // Generate title: Use reverse search result first, then Vision API fallback
+      let generatedTitle = productTitle; // From reverse image search
+
+      if (!generatedTitle) {
+        // Fallback to Vision API detection
+        if (brand && category) {
+          const capitalizedCategory = category.charAt(0).toUpperCase() + category.slice(1);
+          generatedTitle = `${brand} ${capitalizedCategory}`;
+        } else if (brand) {
+          const topLabel = recognition.labels[0];
+          const capitalizedLabel = topLabel ? topLabel.charAt(0).toUpperCase() + topLabel.slice(1) : '';
+          generatedTitle = `${brand} ${capitalizedLabel}`;
+        } else if (category) {
+          const capitalizedCategory = category.charAt(0).toUpperCase() + category.slice(1);
+          generatedTitle = capitalizedCategory;
+        } else {
+          const topLabels = recognition.labels.slice(0, 2).map(l => l.charAt(0).toUpperCase() + l.slice(1)).join(' ');
+          generatedTitle = topLabels || 'Clothing Item';
+        }
+      }
+
       // Update listing
       handleUpdateListing(index, {
-        title: item.listing.title || `${brand} ${category}`.trim() || 'Listing',
+        title: item.listing.title || generatedTitle.trim(),
         brand: brand || item.listing.brand,
         category: category || item.listing.category,
         description: descriptionResult.fullText,

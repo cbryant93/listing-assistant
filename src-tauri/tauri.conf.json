@@ -12,7 +12,14 @@
   },
   "tauri": {
     "allowlist": {
-      "all": true
+      "all": true,
+      "http": {
+        "all": true,
+        "scope": [
+          "https://serpapi.com/*",
+          "https://vision.googleapis.com/*"
+        ]
+      }
     },
     "bundle": {
       "active": true,

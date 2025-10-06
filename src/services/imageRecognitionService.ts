@@ -11,7 +11,7 @@
  * Sign up: https://cloud.google.com/vision
  */
 
-import axios from 'axios';
+import { fetch } from '@tauri-apps/api/http';
 
 export interface ImageRecognitionResult {
   brand?: string;
@@ -31,25 +31,35 @@ export async function analyzeImage(
   apiKey: string
 ): Promise<ImageRecognitionResult> {
   try {
-    const response = await axios.post(
+    const response = await fetch(
       `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
       {
-        requests: [
-          {
-            image: {
-              content: imageBase64,
-            },
-            features: [
-              { type: 'LOGO_DETECTION', maxResults: 5 },
-              { type: 'LABEL_DETECTION', maxResults: 10 },
-              { type: 'TEXT_DETECTION', maxResults: 1 },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: {
+          type: 'Json',
+          payload: {
+            requests: [
+              {
+                image: {
+                  content: imageBase64,
+                },
+                features: [
+                  { type: 'LOGO_DETECTION', maxResults: 5 },
+                  { type: 'LABEL_DETECTION', maxResults: 10 },
+                  { type: 'TEXT_DETECTION', maxResults: 1 },
+                ],
+              },
             ],
           },
-        ],
+        },
       }
     );
 
-    const annotations = response.data.responses[0];
+    const data = response.data as any;
+    const annotations = data.responses[0];
 
     // Extract brand from logo detection
     let brand: string | undefined;
