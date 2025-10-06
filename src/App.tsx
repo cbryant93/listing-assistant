@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/api/dialog';
+import { invoke } from '@tauri-apps/api/tauri';
 import { PhotoGroup } from './services/photoGroupingService';
 import { Listing } from './types/listing';
 import UploadScreen from './components/UploadScreen';
@@ -40,10 +41,10 @@ function App() {
       const photoPaths = Array.isArray(selected) ? selected : [selected];
       console.log('Photo paths:', photoPaths);
 
-      // TODO: Implement photo grouping in Rust backend
-      // For now, create one group with all photos
+      // Simple mode: Create one item with all selected photos
+      // User will upload photos item-by-item
       const groups = [{
-        id: 'item-1',
+        id: `item-${items.length + 1}`,
         photos: photoPaths,
         primaryPhoto: photoPaths[0],
         confidence: 1.0,
@@ -163,7 +164,7 @@ function App() {
               onClick={handleUploadPhotos}
               className="w-full py-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 hover:text-gray-700 transition-colors"
             >
-              ➕ Add More Photos
+              ➕ Add New Item (Upload Photos)
             </button>
 
             {/* Upload to Vinted Button */}
