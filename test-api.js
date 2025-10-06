@@ -56,6 +56,7 @@ async function testVisionAPI() {
                 { type: 'LOGO_DETECTION', maxResults: 5 },
                 { type: 'LABEL_DETECTION', maxResults: 10 },
                 { type: 'TEXT_DETECTION', maxResults: 1 },
+                { type: 'WEB_DETECTION', maxResults: 10 },
               ],
             },
           ],
@@ -94,33 +95,56 @@ async function testVisionAPI() {
       console.log('- No text detected');
     }
 
+    // Extract web detection data
+    let webData = null;
+    if (annotations.webDetection) {
+      const web = annotations.webDetection;
+      console.log();
+      console.log('✓ Web Detection:');
+
+      if (web.bestGuessLabels && web.bestGuessLabels.length > 0) {
+        console.log('  Best guess:', web.bestGuessLabels[0].label);
+      }
+
+      if (web.webEntities && web.webEntities.length > 0) {
+        console.log('  Web entities:', web.webEntities.slice(0, 3).map(e => e.description).join(', '));
+      }
+
+      if (web.pagesWithMatchingImages && web.pagesWithMatchingImages.length > 0) {
+        console.log('  Pages with matching images:', web.pagesWithMatchingImages.length);
+        console.log('  Top 3 pages:');
+        web.pagesWithMatchingImages.slice(0, 3).forEach((page, i) => {
+          console.log(`    ${i + 1}. ${page.pageTitle || 'No title'}`);
+          console.log(`       ${page.url}`);
+        });
+      }
+
+      webData = web;
+    }
+
     console.log();
-    return { brand, labels, text };
+    return { brand, labels, text, webData };
   } catch (error) {
     console.error('✗ Vision API Error:', error.message);
     return null;
   }
 }
 
-// Test 2: SerpAPI Reverse Image Search
-async function testSerpAPI() {
-  console.log('TEST 2: SerpAPI Reverse Image Search (Google Lens)');
+// Test 2: SerpAPI Google Shopping Search
+async function testGoogleShopping(searchQuery) {
+  console.log('TEST 2: SerpAPI Google Shopping Search');
   console.log('-'.repeat(80));
+  console.log('Search query:', searchQuery);
+  console.log();
 
   try {
-    const response = await fetch(
-      `https://serpapi.com/search?engine=google_lens&api_key=${SERPAPI_KEY}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: base64Image,
-        }),
-      }
-    );
+    const url = new URL('https://serpapi.com/search');
+    url.searchParams.set('engine', 'google_shopping');
+    url.searchParams.set('q', searchQuery);
+    url.searchParams.set('api_key', SERPAPI_KEY);
+    url.searchParams.set('num', '10');
 
+    const response = await fetch(url.toString());
     const data = await response.json();
 
     if (data.error) {
@@ -130,32 +154,35 @@ async function testSerpAPI() {
 
     console.log('✓ SerpAPI Response received');
 
-    // Parse visual matches
-    if (data.visual_matches && data.visual_matches.length > 0) {
-      console.log('✓ Visual matches found:', data.visual_matches.length);
-      console.log();
-      console.log('Top 3 matches:');
-      data.visual_matches.slice(0, 3).forEach((match, i) => {
-        console.log(`  ${i + 1}. ${match.title || 'No title'}`);
-        console.log(`     Source: ${match.source || 'Unknown'}`);
-        console.log(`     Link: ${match.link || 'No link'}`);
-        console.log();
-      });
-    } else {
-      console.log('- No visual matches found');
-    }
-
     // Parse shopping results
     if (data.shopping_results && data.shopping_results.length > 0) {
       console.log('✓ Shopping results found:', data.shopping_results.length);
       console.log();
-      console.log('Top 3 shopping results:');
-      data.shopping_results.slice(0, 3).forEach((item, i) => {
+      console.log('Top 5 shopping results:');
+      data.shopping_results.slice(0, 5).forEach((item, i) => {
         console.log(`  ${i + 1}. ${item.title || 'No title'}`);
         console.log(`     Price: £${item.extracted_price || item.price || 'N/A'}`);
         console.log(`     Source: ${item.source || 'Unknown'}`);
+        console.log(`     Rating: ${item.rating || 'N/A'} (${item.reviews || 0} reviews)`);
         console.log();
       });
+
+      // Calculate average/median price for RRP estimation
+      const prices = data.shopping_results
+        .map(r => r.extracted_price || r.price)
+        .filter(p => p && !isNaN(p));
+
+      if (prices.length > 0) {
+        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+        const sortedPrices = [...prices].sort((a, b) => a - b);
+        const medianPrice = sortedPrices[Math.floor(sortedPrices.length / 2)];
+
+        console.log('Price analysis:');
+        console.log(`  Average: £${avgPrice.toFixed(2)}`);
+        console.log(`  Median: £${medianPrice.toFixed(2)}`);
+        console.log(`  Range: £${Math.min(...prices).toFixed(2)} - £${Math.max(...prices).toFixed(2)}`);
+        console.log();
+      }
     } else {
       console.log('- No shopping results found');
     }
@@ -170,29 +197,85 @@ async function testSerpAPI() {
 
 // Run tests
 (async () => {
+  // Step 1: Use Vision API to detect brand and category
   const visionResult = await testVisionAPI();
-  const serpResult = await testSerpAPI();
 
+  if (!visionResult) {
+    console.log('Vision API failed - cannot continue');
+    return;
+  }
+
+  // Step 2: Build search query from Vision API results
+  let searchQuery = '';
+  if (visionResult.brand && visionResult.labels.length > 0) {
+    searchQuery = `${visionResult.brand} ${visionResult.labels[0]}`;
+  } else if (visionResult.brand) {
+    searchQuery = visionResult.brand;
+  } else if (visionResult.labels.length > 0) {
+    searchQuery = visionResult.labels.slice(0, 2).join(' ');
+  }
+
+  console.log();
+
+  // Step 3: Use search query to find products on Google Shopping
+  let shoppingResult = null;
+  if (searchQuery) {
+    shoppingResult = await testGoogleShopping(searchQuery);
+  } else {
+    console.log('Could not build search query from Vision API results');
+  }
+
+  // Summary
   console.log('='.repeat(80));
-  console.log('SUMMARY');
+  console.log('FINAL RESULTS');
   console.log('='.repeat(80));
 
   if (visionResult) {
-    console.log('Vision API: ✓ Success');
+    console.log('✓ Product Detection (Vision API):');
     if (visionResult.brand) {
       console.log('  Brand:', visionResult.brand);
     }
+    console.log('  Category:', visionResult.labels[0] || 'Unknown');
     console.log('  Labels:', visionResult.labels.slice(0, 3).join(', '));
-  } else {
-    console.log('Vision API: ✗ Failed');
+
+    // Suggested title
+    let title = '';
+    if (visionResult.brand && visionResult.labels[0]) {
+      title = `${visionResult.brand} ${visionResult.labels[0]}`;
+    } else if (visionResult.brand) {
+      title = visionResult.brand;
+    } else if (visionResult.labels.length > 0) {
+      title = visionResult.labels.slice(0, 2).join(' ');
+    }
+    console.log('  Suggested Title:', title);
   }
 
-  if (serpResult) {
-    console.log('SerpAPI: ✓ Success');
-    if (serpResult.visual_matches && serpResult.visual_matches.length > 0) {
-      console.log('  Top match:', serpResult.visual_matches[0].title);
+  console.log();
+
+  if (shoppingResult && shoppingResult.shopping_results) {
+    console.log('✓ Price Data (Google Shopping):');
+
+    const prices = shoppingResult.shopping_results
+      .map(r => r.extracted_price || r.price)
+      .filter(p => p && !isNaN(p));
+
+    if (prices.length > 0) {
+      const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+      const medianPrice = [...prices].sort((a, b) => a - b)[Math.floor(prices.length / 2)];
+
+      console.log('  Suggested RRP:', `£${medianPrice.toFixed(2)} (median price from ${prices.length} results)`);
+      console.log('  Price range:', `£${Math.min(...prices).toFixed(2)} - £${Math.max(...prices).toFixed(2)}`);
+
+      // Calculate suggested Vinted price: (RRP / 2) + 5
+      const suggestedPrice = (medianPrice / 2) + 5;
+      console.log('  Suggested Vinted Price:', `£${suggestedPrice.toFixed(2)} (formula: RRP/2 + 5)`);
+    } else {
+      console.log('  No price data available');
     }
-  } else {
-    console.log('SerpAPI: ✗ Failed');
+
+    if (shoppingResult.shopping_results.length > 0) {
+      const topResult = shoppingResult.shopping_results[0];
+      console.log('  Top result:', topResult.title);
+    }
   }
 })();
