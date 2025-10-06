@@ -99,32 +99,27 @@ function App() {
       const { calculatePrice } = await import('./services/pricingService');
       const { generateDescription } = await import('./services/aiDescriptionService');
       const { getRRP, getProductInfoForAI } = await import('./services/googleShoppingService');
-      const { analyzeImage } = await import('./services/imageRecognitionService');
+      const { analyzeMultipleImages } = await import('./services/multiImageRecognitionService');
 
-      // Load image as base64
-      const imageData = await invoke<string>('read_image_as_base64', { filePath: item.group.primaryPhoto });
-      const base64Image = imageData.split(',')[1]; // Remove data:image/jpeg;base64, prefix
+      console.log('Starting auto-fill...');
+      console.log(`Analyzing ${item.group.photos.length} photos...`);
 
-      console.log('Starting auto-fill with image:', item.group.primaryPhoto);
+      // Load ALL images as base64
+      const base64Images: string[] = [];
+      for (const photoPath of item.group.photos) {
+        const imageData = await invoke<string>('read_image_as_base64', { filePath: photoPath });
+        const base64Image = imageData.split(',')[1]; // Remove data:image/jpeg;base64, prefix
+        base64Images.push(base64Image);
+      }
 
-      // Step 1: Analyze photo with Vision API for brand/category/labels
-      console.log('Step 1: Calling Google Vision API...');
-      const recognition = await analyzeImage(base64Image, 'AIzaSyBMcOzFdSDZqD2gIHFxihPk_4dgeKS46QU');
-      console.log('Vision API result:', recognition);
+      // Step 1: Analyze ALL photos with Vision API for brand/category/labels
+      console.log('Step 1: Analyzing all images with Google Vision API...');
+      const recognition = await analyzeMultipleImages(base64Images, 'AIzaSyBMcOzFdSDZqD2gIHFxihPk_4dgeKS46QU');
+      console.log('Multi-image analysis result:', recognition);
 
       const brand = item.listing.brand || recognition.brand || '';
-      const category = item.listing.category || recognition.category || '';
-
-      // Build title from Vision API detection
-      let productTitle = '';
-      if (brand && category) {
-        productTitle = `${brand} ${category.charAt(0).toUpperCase() + category.slice(1)}`;
-      } else if (brand && recognition.labels.length > 0) {
-        const topLabel = recognition.labels[0];
-        productTitle = `${brand} ${topLabel.charAt(0).toUpperCase() + topLabel.slice(1)}`;
-      } else if (recognition.labels.length > 0) {
-        productTitle = recognition.labels.slice(0, 2).map(l => l.charAt(0).toUpperCase() + l.slice(1)).join(' ');
-      }
+      const category = item.listing.category || recognition.suggestedCategory || '';
+      const productTitle = recognition.suggestedTitle;
 
       // Step 2: Get RRP from Google Shopping (median price)
       console.log('Step 2: Getting RRP from Google Shopping...');
