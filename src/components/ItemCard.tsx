@@ -2,10 +2,21 @@ import { Listing } from '../types/listing';
 import { PhotoGroup } from '../services/photoGroupingService';
 import PhotoThumbnail from './PhotoThumbnail';
 
+interface ProductSuggestion {
+  title: string;
+  price?: number;
+  source: string;
+  thumbnail?: string;
+  link?: string;
+}
+
 interface ItemData {
   group: PhotoGroup;
   listing: Partial<Listing>;
   isExpanded: boolean;
+  isAnalyzing?: boolean;
+  productSuggestions?: ProductSuggestion[];
+  selectedProduct?: ProductSuggestion;
 }
 
 interface ItemCardProps {
@@ -13,6 +24,7 @@ interface ItemCardProps {
   index: number;
   onToggleExpand: (index: number) => void;
   onUpdateListing: (index: number, updates: Partial<Listing>) => void;
+  onProductSelect: (index: number, product: ProductSuggestion) => void;
   onAutoFill: (index: number) => void;
   onDelete: (index: number) => void;
 }
@@ -22,6 +34,7 @@ export default function ItemCard({
   index,
   onToggleExpand,
   onUpdateListing,
+  onProductSelect,
   onAutoFill,
   onDelete,
 }: ItemCardProps) {
@@ -59,11 +72,25 @@ export default function ItemCard({
           ))}
         </div>
 
+        {/* Analyzing Status */}
+        {item.isAnalyzing && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+            <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span className="text-sm text-blue-700 font-medium">
+              Analyzing photos with AI... Please wait.
+            </span>
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="flex gap-2">
           <button
             onClick={() => onAutoFill(index)}
-            className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-sm font-medium"
+            disabled={item.isAnalyzing}
+            className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
             ✨ Auto-Fill
           </button>
@@ -95,6 +122,54 @@ export default function ItemCard({
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
                 placeholder="e.g., Nike Running Trainers"
               />
+
+              {/* Product Suggestions */}
+              {item.productSuggestions && item.productSuggestions.length > 0 && (
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-2">
+                    💡 Found {item.productSuggestions.length} similar products - click to use:
+                  </label>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {item.productSuggestions.map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => onProductSelect(index, suggestion)}
+                        className="w-full text-left p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                      >
+                        <div className="flex gap-3 items-start">
+                          {/* Product Thumbnail */}
+                          {suggestion.thumbnail && (
+                            <div className="flex-shrink-0">
+                              <img
+                                src={suggestion.thumbnail}
+                                alt={suggestion.title}
+                                className="w-20 h-20 object-cover rounded border border-gray-200"
+                                onError={(e) => {
+                                  // Hide image if it fails to load
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Product Details */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start gap-2 mb-1">
+                              <span className="text-sm text-gray-900 flex-1">{suggestion.title}</span>
+                              {suggestion.price && (
+                                <span className="text-sm font-semibold text-green-600 whitespace-nowrap">
+                                  £{suggestion.price}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-gray-500 block">{suggestion.source}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Brand */}

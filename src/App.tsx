@@ -6,10 +6,21 @@ import { Listing } from './types/listing';
 import UploadScreen from './components/UploadScreen';
 import ItemCard from './components/ItemCard';
 
+interface ProductSuggestion {
+  title: string;
+  price?: number;
+  source: string;
+  thumbnail?: string;
+  link?: string; // Product URL for future scraping
+}
+
 interface ItemData {
   group: PhotoGroup;
   listing: Partial<Listing>;
   isExpanded: boolean;
+  isAnalyzing?: boolean;
+  productSuggestions?: ProductSuggestion[];
+  selectedProduct?: ProductSuggestion; // Store selected product for description generation
 }
 
 function App() {
@@ -90,11 +101,34 @@ function App() {
     ));
   };
 
+  const handleProductSelect = (index: number, product: ProductSuggestion) => {
+    setItems(items.map((item, i) => {
+      if (i === index) {
+        return {
+          ...item,
+          listing: {
+            ...item.listing,
+            title: product.title,
+            rrp: product.price || item.listing.rrp
+          },
+          selectedProduct: product, // Store for future description generation
+          productSuggestions: undefined // Clear suggestions to hide dropdown
+        };
+      }
+      return item;
+    }));
+  };
+
   const handleAutoFill = async (index: number) => {
     const item = items[index];
 
     try {
       setIsProcessing(true);
+
+      // Set analyzing state for this item
+      setItems(prev => prev.map((it, i) =>
+        i === index ? { ...it, isAnalyzing: true } : it
+      ));
 
       const { calculatePrice } = await import('./services/pricingService');
       const { generateDescription } = await import('./services/aiDescriptionService');
@@ -120,30 +154,139 @@ function App() {
       const brand = item.listing.brand || recognition.brand || '';
       const category = item.listing.category || recognition.suggestedCategory || '';
       const productTitle = recognition.suggestedTitle;
+      const smartQuery = recognition.smartQuery; // Smart query built from OCR + labels!
 
-      // Step 2: Get RRP from Google Shopping (median price)
-      console.log('Step 2: Getting RRP from Google Shopping...');
+      // Step 2: Build simple, clean search queries
+      console.log('Step 2: Building search queries...');
+      const { searchGoogleShopping } = await import('./services/googleShoppingService');
+
+      const queryVariations: string[] = [];
+
+      // Get top 2-3 non-color, non-generic labels from Vision API (they're already good!)
+      const colors = ['white', 'black', 'red', 'blue', 'grey', 'gray', 'green', 'yellow'];
+      const genericTerms = ['fashion', 'textile', 'clothing', 'apparel', 'garment', 'product', 'style', 'design'];
+
+      const goodLabels = recognition.topLabels
+        .filter(l => {
+          const lower = l.label.toLowerCase();
+          return !colors.includes(lower) && !genericTerms.includes(lower);
+        })
+        .slice(0, 3); // Top 3 labels only
+
+      console.log('Using labels:', goodLabels.map(l => l.label));
+      console.log('Smart query (with OCR keywords):', smartQuery);
+
+      if (brand && goodLabels.length > 0) {
+        // Query 1: Use the smart query (includes OCR keywords like "taco", "graphic", etc.)
+        // e.g., "adidas running shirt taco"
+        if (smartQuery) {
+          queryVariations.push(smartQuery);
+        }
+
+        // Query 2: Brand + best label (simple fallback)
+        // e.g., "dickies sweater vest"
+        queryVariations.push(`${brand} ${goodLabels[0].label.toLowerCase()}`);
+
+        // Query 3: Brand + second label (alternative view)
+        // e.g., "dickies sleeveless shirt"
+        if (goodLabels.length >= 2) {
+          queryVariations.push(`${brand} ${goodLabels[1].label.toLowerCase()}`);
+        }
+
+        // Query 4: Brand + top 2 labels combined (more specific)
+        // e.g., "dickies sweater vest sleeveless shirt"
+        if (goodLabels.length >= 2) {
+          queryVariations.push(`${brand} ${goodLabels[0].label.toLowerCase()} ${goodLabels[1].label.toLowerCase()}`);
+        }
+      }
+
+      console.log('Running queries:', queryVariations);
+
       let rrpFromShopping = null;
-      if (brand && category) {
+      let scrapedData = null;
+      const productSuggestions: ProductSuggestion[] = [];
+      const allPrices: number[] = [];
+
+      // Run all query variations and collect results
+      for (const query of queryVariations) {
         try {
-          rrpFromShopping = await getRRP(brand, category, 'e0100564fc4f869cb5b7aa5411263e372dfae03fa1e7d214b7b6c98f14b606d5');
-          console.log('RRP from shopping:', rrpFromShopping);
+          console.log(`Searching: "${query}"`);
+          const shoppingResults = await searchGoogleShopping(
+            query,
+            'e0100564fc4f869cb5b7aa5411263e372dfae03fa1e7d214b7b6c98f14b606d5'
+          );
+
+          console.log(`  Found ${shoppingResults.products.length} results`);
+
+          // Collect top 5 products from each query (avoid duplicates by title)
+          const existingTitles = new Set(productSuggestions.map(s => s.title.toLowerCase()));
+
+          shoppingResults.products.slice(0, 5).forEach(product => {
+            const titleLower = product.title.toLowerCase();
+            if (!existingTitles.has(titleLower)) {
+              productSuggestions.push({
+                title: product.title,
+                price: product.extracted_price || product.price,
+                source: `${product.source || 'Google Shopping'} (${query})`,
+                thumbnail: product.thumbnail,
+                link: product.link // Store product URL for future scraping
+              });
+              existingTitles.add(titleLower);
+            }
+          });
+
+          // Collect all prices for median calculation
+          const prices = shoppingResults.products
+            .map(p => p.extracted_price || p.price)
+            .filter((p): p is number => p !== undefined && p > 0);
+          allPrices.push(...prices);
+
+          // Use first query's top product for description data
+          if (!scrapedData && shoppingResults.products.length > 0) {
+            scrapedData = shoppingResults.products[0];
+          }
+
         } catch (error) {
-          console.error('Error getting RRP:', error);
+          console.error(`Error searching "${query}":`, error);
         }
       }
 
-      // Step 3: Get product info for description
-      console.log('Step 3: Getting product details for description...');
-      let scrapedData = null;
-      if (brand && category) {
-        try {
-          scrapedData = await getProductInfoForAI(brand, category, 'e0100564fc4f869cb5b7aa5411263e372dfae03fa1e7d214b7b6c98f14b606d5');
-          console.log('Product info:', scrapedData);
-        } catch (error) {
-          console.error('Error getting product info:', error);
-        }
+      // Calculate median RRP from ALL results across all queries
+      if (allPrices.length > 0) {
+        const sortedPrices = [...allPrices].sort((a, b) => a - b);
+        rrpFromShopping = sortedPrices[Math.floor(sortedPrices.length / 2)];
+        console.log(`Total results: ${productSuggestions.length} products, Median RRP: £${rrpFromShopping}`);
       }
+
+      // Prioritize results by retailer tier
+      const premiumRetailers = ['asos', 'john lewis', 'zalando', 'next', 'selfridges', 'harrods'];
+      const standardRetailers = ['m&s', 'marks & spencer', 'debenhams', 'jd sports', 'sports direct',
+                                  'nike', 'adidas', 'very', 'boohoo', 'pretty little thing'];
+      const marketplaceRetailers = ['amazon', 'ebay'];
+
+      const getRetailerTier = (source: string): number => {
+        const lower = source.toLowerCase();
+        if (premiumRetailers.some(r => lower.includes(r))) return 1; // Best
+        if (standardRetailers.some(r => lower.includes(r))) return 2; // Good
+        if (marketplaceRetailers.some(r => lower.includes(r))) return 3; // Last resort
+        return 4; // Unknown retailers last
+      };
+
+      productSuggestions.sort((a, b) => {
+        // First: Sort by retailer tier (premium > standard > marketplace > unknown)
+        const aTier = getRetailerTier(a.source);
+        const bTier = getRetailerTier(b.source);
+        if (aTier !== bTier) return aTier - bTier;
+
+        // Second: Prioritize items with prices
+        if (a.price && !b.price) return -1;
+        if (!a.price && b.price) return 1;
+
+        // Third: Higher price first (RRP is usually more accurate than clearance prices)
+        if (a.price && b.price) return b.price - a.price;
+
+        return 0; // Keep original order
+      });
 
       // Use RRP from Google Shopping
       let rrp = item.listing.rrp || 0;
@@ -198,7 +341,7 @@ function App() {
         }
       }
 
-      // Update listing
+      // Update listing with product suggestions
       handleUpdateListing(index, {
         title: item.listing.title || generatedTitle.trim(),
         brand: brand || item.listing.brand,
@@ -208,6 +351,16 @@ function App() {
         rrp: rrp > 0 ? rrp : undefined,
       });
 
+      // Update item with product suggestions and clear analyzing state
+      setItems(prev => prev.map((it, i) =>
+        i === index ? {
+          ...it,
+          isAnalyzing: false,
+          productSuggestions: productSuggestions.length > 0 ? productSuggestions : undefined,
+          isExpanded: true // Auto-expand to show the suggestions
+        } : it
+      ));
+
       setIsProcessing(false);
 
       alert('Auto-fill complete! ✨\n\n' +
@@ -215,6 +368,12 @@ function App() {
         (scrapedData ? 'Used Google Shopping data for description.' : ''));
     } catch (error) {
       console.error('Error auto-filling data:', error);
+
+      // Clear analyzing state on error
+      setItems(prev => prev.map((it, i) =>
+        i === index ? { ...it, isAnalyzing: false } : it
+      ));
+
       setIsProcessing(false);
       alert('Error auto-filling data: ' + (error as Error).message);
     }
@@ -256,6 +415,7 @@ function App() {
                 index={index}
                 onToggleExpand={handleToggleExpand}
                 onUpdateListing={handleUpdateListing}
+                onProductSelect={handleProductSelect}
                 onAutoFill={handleAutoFill}
                 onDelete={handleDeleteItem}
               />
