@@ -198,6 +198,9 @@ export default function ItemCard({
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
                 placeholder="e.g., M, UK 10"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                📸 Tip: Take a close-up photo of the size label for better auto-detection
+              </p>
             </div>
 
             {/* Condition */}

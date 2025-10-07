@@ -155,6 +155,7 @@ function App() {
       const category = item.listing.category || recognition.suggestedCategory || '';
       const productTitle = recognition.suggestedTitle;
       const smartQuery = recognition.smartQuery; // Smart query built from OCR + labels!
+      const detectedSize = recognition.detectedSize; // Size extracted from clothing labels
 
       // Step 2: Build simple, clean search queries
       console.log('Step 2: Building search queries...');
@@ -341,11 +342,12 @@ function App() {
         }
       }
 
-      // Update listing with product suggestions
+      // Update listing with product suggestions and detected size
       handleUpdateListing(index, {
         title: item.listing.title || generatedTitle.trim(),
         brand: brand || item.listing.brand,
         category: category || item.listing.category,
+        size: detectedSize || item.listing.size, // Auto-fill size from OCR if detected
         description: descriptionResult.fullText,
         price: calculatedPrice,
         rrp: rrp > 0 ? rrp : undefined,
@@ -365,6 +367,7 @@ function App() {
 
       alert('Auto-fill complete! ✨\n\n' +
         `Detected: ${brand || 'Unknown'} ${category || 'item'}\n` +
+        (detectedSize ? `Size: ${detectedSize}\n` : '') +
         (scrapedData ? 'Used Google Shopping data for description.' : ''));
     } catch (error) {
       console.error('Error auto-filling data:', error);

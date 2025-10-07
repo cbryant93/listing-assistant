@@ -24,6 +24,7 @@ export interface MultiImageRecognitionResult {
   ocrText: string;  // Combined OCR text from all images
   smartQuery: string;  // Smart search query built from OCR + labels
   dominantColor?: string;  // Primary color detected (e.g., "black", "white", "blue")
+  detectedSize?: string;  // Size extracted from clothing labels (e.g., "M", "UK 10", "EU 38")
 }
 
 interface LabelScore {
@@ -221,10 +222,14 @@ export async function analyzeMultipleImages(
       suggestedTitle = topLabels.slice(0, 2).map(l => l.label).join(' ');
     }
 
+    // Extract size from OCR text (from clothing labels)
+    const detectedSize = extractSize(combinedOcrText);
+
     console.log('Multi-image analysis complete:');
     console.log('  Brand:', brand || 'None', `(${(brandConfidence * 100).toFixed(0)}% confidence)`);
     console.log('  Top labels:', topLabels.slice(0, 5).map(l => l.label).join(', '));
     console.log('  Dominant color:', dominantColor || 'None');
+    console.log('  Detected size:', detectedSize || 'None');
     console.log('  Smart query:', smartQuery);
 
     return {
@@ -236,6 +241,7 @@ export async function analyzeMultipleImages(
       ocrText: combinedOcrText,
       smartQuery,
       dominantColor,
+      detectedSize,
     };
   } catch (error) {
     console.error('Error analyzing multiple images:', error);
@@ -360,4 +366,80 @@ function extractDominantColor(labels: string[]): string | undefined {
     .sort((a, b) => b[1] - a[1]);
 
   return sortedColors.length > 0 ? sortedColors[0][0] : undefined;
+}
+
+/**
+ * Extract clothing size from OCR text
+ * Detects various size formats: S/M/L/XL, UK sizes, US sizes, EU sizes, numeric sizes
+ */
+function extractSize(ocrText: string): string | undefined {
+  if (!ocrText) return undefined;
+
+  const upperText = ocrText.toUpperCase();
+  const lines = upperText.split('\n');
+
+  // Pattern 1: Letter sizes (S, M, L, XL, XXL, XXXL)
+  // Look for standalone letter sizes (not part of other words)
+  const letterSizePattern = /\b(XXS|XS|S|M|L|XL|XXL|XXXL)\b/g;
+  const letterMatches = upperText.match(letterSizePattern);
+  if (letterMatches) {
+    // Filter out common words that might match (like "SMALL" contains "S")
+    const validSizes = letterMatches.filter(size => {
+      // Make sure it's not part of a longer word
+      const regex = new RegExp(`\\b${size}\\b(?!\\w)`, 'g');
+      return regex.test(upperText);
+    });
+    if (validSizes.length > 0) {
+      return validSizes[0]; // Return first found
+    }
+  }
+
+  // Pattern 2: UK sizes (UK 6, UK 8, UK 10, SIZE UK 10, etc.)
+  const ukPattern = /(?:UK\s*)?(?:SIZE\s*)?UK\s*(\d{1,2}(?:\.\d)?)/i;
+  const ukMatch = ocrText.match(ukPattern);
+  if (ukMatch) {
+    return `UK ${ukMatch[1]}`;
+  }
+
+  // Pattern 3: US sizes (US 4, US 6, SIZE US 8, etc.)
+  const usPattern = /(?:US\s*)?(?:SIZE\s*)?US\s*(\d{1,2}(?:\.\d)?)/i;
+  const usMatch = ocrText.match(usPattern);
+  if (usMatch) {
+    return `US ${usMatch[1]}`;
+  }
+
+  // Pattern 4: EU sizes (EU 36, EU 38, EUR 40, etc.)
+  const euPattern = /(?:EU|EUR)\s*(\d{2,3})/i;
+  const euMatch = ocrText.match(euPattern);
+  if (euMatch) {
+    return `EU ${euMatch[1]}`;
+  }
+
+  // Pattern 5: Generic "SIZE: X" or "SIZE X" on labels
+  const genericSizePattern = /SIZE\s*:?\s*([A-Z]{1,4}|\d{1,2})/i;
+  const genericMatch = ocrText.match(genericSizePattern);
+  if (genericMatch) {
+    const size = genericMatch[1].toUpperCase();
+    // Validate it's a reasonable size
+    if (/^(XXS|XS|S|M|L|XL|XXL|XXXL|\d{1,2})$/.test(size)) {
+      return size;
+    }
+  }
+
+  // Pattern 6: Chest/waist measurements (e.g., "38" for 38" chest, "32" for 32" waist)
+  // Look for standalone numbers near size-related words
+  for (const line of lines) {
+    if (/CHEST|WAIST|BUST/i.test(line)) {
+      const numMatch = line.match(/\b(\d{2,3})\b/);
+      if (numMatch) {
+        const num = parseInt(numMatch[1]);
+        // Reasonable chest/waist range: 24-60 inches
+        if (num >= 24 && num <= 60) {
+          return numMatch[1];
+        }
+      }
+    }
+  }
+
+  return undefined;
 }
