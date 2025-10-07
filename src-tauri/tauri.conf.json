@@ -17,7 +17,20 @@
         "all": true,
         "scope": [
           "https://serpapi.com/*",
-          "https://vision.googleapis.com/*"
+          "https://vision.googleapis.com/*",
+          "https://*.asos.com/*",
+          "https://*.johnlewis.com/*",
+          "https://*.ebay.com/*",
+          "https://*.ebay.co.uk/*",
+          "https://*.amazon.com/*",
+          "https://*.amazon.co.uk/*",
+          "https://*.zalando.co.uk/*",
+          "https://*.next.co.uk/*",
+          "https://*.marksandspencer.com/*",
+          "https://*.nike.com/*",
+          "https://*.adidas.com/*",
+          "https://*.adidas.co.uk/*",
+          "https://*"
         ]
       }
     },

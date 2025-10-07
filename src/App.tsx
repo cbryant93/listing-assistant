@@ -101,7 +101,8 @@ function App() {
     ));
   };
 
-  const handleProductSelect = (index: number, product: ProductSuggestion) => {
+  const handleProductSelect = async (index: number, product: ProductSuggestion) => {
+    // Immediately update UI to show selection
     setItems(items.map((item, i) => {
       if (i === index) {
         return {
@@ -117,6 +118,46 @@ function App() {
       }
       return item;
     }));
+
+    // Scrape product page for better description (async, don't block UI)
+    if (product.link) {
+      try {
+        const { scrapeProductPage } = await import('./services/webScraperService');
+        const { generateDescription } = await import('./services/aiDescriptionService');
+
+        console.log(`Scraping product page for better description: ${product.link}`);
+        const scrapedData = await scrapeProductPage(product.link);
+
+        const item = items[index];
+
+        // Generate enhanced description with scraped data
+        const descriptionResult = generateDescription({
+          brand: item.listing.brand,
+          category: item.listing.category,
+          size: item.listing.size,
+          condition: item.listing.condition || 'very_good',
+          colors: item.listing.colors,
+          materials: item.listing.materials,
+          scrapedData: scrapedData.description || scrapedData.features ? {
+            title: scrapedData.title || product.title,
+            description: scrapedData.description,
+            features: scrapedData.features,
+            material: scrapedData.material,
+            color: scrapedData.color,
+          } : undefined,
+        });
+
+        // Update description with scraped data
+        handleUpdateListing(index, {
+          description: descriptionResult.fullText,
+        });
+
+        console.log('Enhanced description generated from scraped data');
+      } catch (error) {
+        console.error('Error scraping product page:', error);
+        // Don't show error to user - description will just use default logic
+      }
+    }
   };
 
   const handleAutoFill = async (index: number) => {

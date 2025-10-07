@@ -23,6 +23,9 @@ export interface DescriptionInput {
     price?: number;
     rating?: number;
     reviews?: number;
+    features?: string[];
+    material?: string;
+    color?: string;
   };
 }
 
@@ -77,18 +80,28 @@ export function generateDescription(input: DescriptionInput): DescriptionOutput 
     }
   }
 
-  // Color and material details
-  if (colors.length > 0) {
-    const colorText = colors.length === 1
-      ? colors[0]
-      : colors.slice(0, -1).join(', ') + ' and ' + colors[colors.length - 1];
-    parts.push(`Features a beautiful ${colorText} color${colors.length > 1 ? ' combination' : ''}.`);
+  // Add product features from scraped data
+  if (scrapedData?.features && scrapedData.features.length > 0) {
+    // Take up to 2 most relevant features
+    const topFeatures = scrapedData.features.slice(0, 2);
+    parts.push(topFeatures.join('. ') + '.');
   }
 
-  if (materials.length > 0) {
-    const materialText = materials.length === 1
-      ? materials[0]
-      : materials.join(', ');
+  // Color and material details (use scraped data if available, otherwise use provided)
+  const finalColors = scrapedData?.color ? [scrapedData.color] : colors;
+  const finalMaterials = scrapedData?.material ? [scrapedData.material] : materials;
+
+  if (finalColors.length > 0) {
+    const colorText = finalColors.length === 1
+      ? finalColors[0]
+      : finalColors.slice(0, -1).join(', ') + ' and ' + finalColors[finalColors.length - 1];
+    parts.push(`Features a beautiful ${colorText} color${finalColors.length > 1 ? ' combination' : ''}.`);
+  }
+
+  if (finalMaterials.length > 0) {
+    const materialText = finalMaterials.length === 1
+      ? finalMaterials[0]
+      : finalMaterials.join(', ');
     parts.push(`Made from ${materialText}.`);
   }
 
@@ -122,7 +135,7 @@ export function generateDescription(input: DescriptionInput): DescriptionOutput 
 
 /**
  * Generate relevant hashtags for the item
- * Returns 5 hashtags based on brand, category, colors, materials, condition
+ * Returns 5 hashtags based on brand, category, colors, materials, condition, and scraped data
  */
 function generateHashtags(input: DescriptionInput): string[] {
   const hashtags: string[] = [];
@@ -137,14 +150,16 @@ function generateHashtags(input: DescriptionInput): string[] {
     hashtags.push(input.category.replace(/\s+/g, '').toLowerCase());
   }
 
-  // Color hashtags (first 2 colors)
-  if (input.colors && input.colors.length > 0) {
-    hashtags.push(...input.colors.slice(0, 2).map(c => c.replace(/\s+/g, '').toLowerCase()));
+  // Color hashtags (prefer scraped color, otherwise use provided colors)
+  const colors = input.scrapedData?.color ? [input.scrapedData.color] : input.colors;
+  if (colors && colors.length > 0) {
+    hashtags.push(...colors.slice(0, 2).map(c => c.replace(/\s+/g, '').toLowerCase()));
   }
 
-  // Material hashtag (first material only)
-  if (input.materials && input.materials.length > 0) {
-    hashtags.push(input.materials[0].replace(/\s+/g, '').toLowerCase());
+  // Material hashtag (prefer scraped material, otherwise use provided)
+  const materials = input.scrapedData?.material ? [input.scrapedData.material] : input.materials;
+  if (materials && materials.length > 0) {
+    hashtags.push(materials[0].replace(/\s+/g, '').toLowerCase());
   }
 
   // Condition hashtag
