@@ -19,16 +19,97 @@ export interface ScrapedProductData {
 }
 
 /**
+ * Search for retailer URL using Google search
+ * Searches for: "[product title] [retailer name]" and extracts the retailer URL
+ */
+export async function searchRetailerUrl(productTitle: string, retailerName: string): Promise<string | null> {
+  try {
+    console.log(`🔍 Searching for retailer URL: "${productTitle}" at ${retailerName}`);
+
+    // Build search query
+    const searchQuery = encodeURIComponent(`${productTitle} ${retailerName} buy`);
+    const searchUrl = `https://www.google.com/search?q=${searchQuery}`;
+
+    const response = await fetch(searchUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      responseType: 2,
+    });
+
+    if (!response.ok) {
+      console.error(`Google search failed: ${response.status}`);
+      return null;
+    }
+
+    const html = response.data as string;
+
+    // Map retailer names to domains
+    const retailers: Record<string, string[]> = {
+      'asos': ['asos.com'],
+      'johnlewis': ['johnlewis.com'],
+      'john lewis': ['johnlewis.com'],
+      'zalando': ['zalando.co.uk'],
+      'ebay': ['ebay.co.uk'],
+      'amazon': ['amazon.co.uk'],
+      'next': ['next.co.uk'],
+      'marksandspencer': ['marksandspencer.com'],
+      'm&s': ['marksandspencer.com'],
+      'marks & spencer': ['marksandspencer.com'],
+      'nike': ['nike.com'],
+      'adidas': ['adidas.co.uk', 'adidas.com'],
+    };
+
+    // Find matching domain
+    const retailerKey = retailerName.toLowerCase().replace(/[^a-z&\s]/g, '');
+    const domains = retailers[retailerKey] || [];
+
+    // Search for URLs from these domains
+    for (const domain of domains) {
+      const escapedDomain = domain.replace('.', '\\.');
+      const urlPattern = new RegExp(`https?:\\/\\/(?:www\\.)?${escapedDomain}\\/[^\\s"'<>]+`, 'gi');
+      const matches = html.match(urlPattern);
+
+      if (matches && matches.length > 0) {
+        const url = matches[0];
+        console.log('✅ Found retailer URL via search:', url);
+        return url;
+      }
+    }
+
+    console.log('❌ No retailer URL found');
+    return null;
+  } catch (error) {
+    console.error('Error searching for retailer URL:', error);
+    return null;
+  }
+}
+
+/**
  * Scrape product page for details
- * @param url Product URL to scrape
+ * @param url Product URL to scrape (can be Google Shopping URL or direct retailer URL)
  * @returns Extracted product data
  */
 export async function scrapeProductPage(url: string): Promise<ScrapedProductData> {
   try {
     console.log(`Scraping product page: ${url}`);
 
+    // If it's a Google Shopping URL, extract the real retailer URL first
+    let targetUrl = url;
+    if (url.includes('google.com') && url.includes('shopping')) {
+      const retailerUrl = await extractRetailerUrl(url);
+      if (retailerUrl) {
+        targetUrl = retailerUrl;
+        console.log(`Using extracted retailer URL: ${targetUrl}`);
+      } else {
+        console.log('Could not extract retailer URL, returning empty data');
+        return {};
+      }
+    }
+
     // Fetch the HTML page
-    const response = await fetch(url, {
+    const response = await fetch(targetUrl, {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -39,7 +120,7 @@ export async function scrapeProductPage(url: string): Promise<ScrapedProductData
     });
 
     if (!response.ok) {
-      console.error(`Failed to fetch ${url}: ${response.status}`);
+      console.error(`Failed to fetch ${targetUrl}: ${response.status}`);
       return {};
     }
 
@@ -288,7 +369,8 @@ function stripHtml(html: string): string {
 /**
  * Clean text (decode entities, trim, remove extra spaces)
  */
-function cleanText(text: string): string {
+function cleanText(text: string | undefined): string {
+  if (!text) return '';
   return text
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')

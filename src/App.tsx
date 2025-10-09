@@ -11,7 +11,9 @@ interface ProductSuggestion {
   price?: number;
   source: string;
   thumbnail?: string;
-  link?: string; // Product URL for future scraping
+  link?: string; // Google Shopping URL
+  serpapi_product_api?: string; // SerpAPI endpoint for retailer URL
+  product_id?: string;
 }
 
 interface ItemData {
@@ -102,60 +104,130 @@ function App() {
   };
 
   const handleProductSelect = async (index: number, product: ProductSuggestion) => {
-    // Immediately update UI to show selection
-    setItems(items.map((item, i) => {
+    console.log('Product selected:', product.title);
+    console.log('Product URL:', product.link);
+
+    // Immediately update UI: fill title/RRP and hide dropdown
+    setItems(prevItems => prevItems.map((it, i) => {
       if (i === index) {
         return {
-          ...item,
+          ...it,
           listing: {
-            ...item.listing,
+            ...it.listing,
             title: product.title,
-            rrp: product.price || item.listing.rrp
+            rrp: product.price || it.listing.rrp,
           },
-          selectedProduct: product, // Store for future description generation
-          productSuggestions: undefined // Clear suggestions to hide dropdown
+          selectedProduct: product,
+          productSuggestions: undefined // Hide dropdown immediately
         };
       }
-      return item;
+      return it;
     }));
 
-    // Scrape product page for better description (async, don't block UI)
-    if (product.link) {
+    // Scrape product page and generate description (async, don't block UI)
+    if (product.product_id) {
       try {
+        const { getProductDetails } = await import('./services/googleShoppingService');
         const { scrapeProductPage } = await import('./services/webScraperService');
         const { generateDescription } = await import('./services/aiDescriptionService');
 
-        console.log(`Scraping product page for better description: ${product.link}`);
-        const scrapedData = await scrapeProductPage(product.link);
+        // Get retailer URL from SerpAPI Product endpoint
+        console.log('Getting retailer URL from SerpAPI Product API...');
+        const productDetails = await getProductDetails(
+          product.product_id,
+          import.meta.env.VITE_SERPAPI_KEY
+        );
 
-        const item = items[index];
+        const retailerUrl = productDetails.retailerUrl;
+        console.log(`Retailer URL: ${retailerUrl || 'Not found'}`);
 
-        // Generate enhanced description with scraped data
-        const descriptionResult = generateDescription({
-          brand: item.listing.brand,
-          category: item.listing.category,
-          size: item.listing.size,
-          condition: item.listing.condition || 'very_good',
-          colors: item.listing.colors,
-          materials: item.listing.materials,
-          scrapedData: scrapedData.description || scrapedData.features ? {
-            title: scrapedData.title || product.title,
-            description: scrapedData.description,
-            features: scrapedData.features,
-            material: scrapedData.material,
-            color: scrapedData.color,
-          } : undefined,
+        // Scrape retailer page if URL found
+        let scrapedData = {};
+        if (retailerUrl) {
+          console.log(`✅ Found retailer URL: ${retailerUrl}`);
+          console.log(`Scraping retailer page for product description...`);
+          scrapedData = await scrapeProductPage(retailerUrl);
+        } else {
+          console.log('❌ No retailer URL found, will generate basic description');
+        }
+
+        console.log('Scraped data:', scrapedData);
+
+        // Get latest item state
+        setItems(prevItems => {
+          const item = prevItems[index];
+
+          // Generate enhanced description with scraped data
+          const descriptionInput = {
+            brand: item.listing.brand,
+            category: item.listing.category,
+            size: item.listing.size,
+            condition: item.listing.condition || 'very_good',
+            colors: item.listing.colors,
+            materials: item.listing.materials,
+            scrapedData: scrapedData.description || scrapedData.features ? {
+              title: scrapedData.title || product.title,
+              description: scrapedData.description,
+              features: scrapedData.features,
+              material: scrapedData.material,
+              color: scrapedData.color,
+            } : undefined,
+          };
+
+          console.log('Description input:', descriptionInput);
+
+          const descriptionResult = generateDescription(descriptionInput);
+
+          console.log('Generated description:', descriptionResult.fullText);
+
+          // Update description
+          return prevItems.map((it, i) => {
+            if (i === index) {
+              return {
+                ...it,
+                listing: {
+                  ...it.listing,
+                  description: descriptionResult.fullText,
+                },
+              };
+            }
+            return it;
+          });
         });
 
-        // Update description with scraped data
-        handleUpdateListing(index, {
-          description: descriptionResult.fullText,
-        });
-
-        console.log('Enhanced description generated from scraped data');
+        console.log('✅ Description generated from scraped product data');
       } catch (error) {
         console.error('Error scraping product page:', error);
-        // Don't show error to user - description will just use default logic
+        // Fallback: generate description using product title as "scraped data"
+        const { generateDescription } = await import('./services/aiDescriptionService');
+        setItems(prevItems => {
+          const item = prevItems[index];
+          const descriptionResult = generateDescription({
+            brand: item.listing.brand,
+            category: item.listing.category,
+            size: item.listing.size,
+            condition: item.listing.condition || 'very_good',
+            colors: item.listing.colors,
+            materials: item.listing.materials,
+            scrapedData: {
+              title: product.title,
+              // Use title as a hint for description generation
+            },
+          });
+          return prevItems.map((it, i) => {
+            if (i === index) {
+              return {
+                ...it,
+                listing: {
+                  ...it.listing,
+                  description: descriptionResult.fullText,
+                },
+              };
+            }
+            return it;
+          });
+        });
+        console.log('⚠️ Generated fallback description using product title (scraping failed)');
       }
     }
   };
@@ -189,7 +261,7 @@ function App() {
 
       // Step 1: Analyze ALL photos with Vision API for brand/category/labels
       console.log('Step 1: Analyzing all images with Google Vision API...');
-      const recognition = await analyzeMultipleImages(base64Images, 'AIzaSyBMcOzFdSDZqD2gIHFxihPk_4dgeKS46QU');
+      const recognition = await analyzeMultipleImages(base64Images, import.meta.env.VITE_GOOGLE_VISION_API_KEY);
       console.log('Multi-image analysis result:', recognition);
 
       const brand = item.listing.brand || recognition.brand || '';
@@ -255,7 +327,7 @@ function App() {
           console.log(`Searching: "${query}"`);
           const shoppingResults = await searchGoogleShopping(
             query,
-            'e0100564fc4f869cb5b7aa5411263e372dfae03fa1e7d214b7b6c98f14b606d5'
+            import.meta.env.VITE_SERPAPI_KEY
           );
 
           console.log(`  Found ${shoppingResults.products.length} results`);
@@ -271,7 +343,9 @@ function App() {
                 price: product.extracted_price || product.price,
                 source: `${product.source || 'Google Shopping'} (${query})`,
                 thumbnail: product.thumbnail,
-                link: product.link // Store product URL for future scraping
+                link: product.link,
+                serpapi_product_api: product.serpapi_product_api, // For getting retailer URL
+                product_id: product.product_id,
               });
               existingTitles.add(titleLower);
             }
@@ -345,23 +419,6 @@ function App() {
         calculatedPrice = priceCalc.suggestedPrice;
       }
 
-      // Generate description with scraped data
-      const descriptionResult = generateDescription({
-        brand: brand || undefined,
-        category: category || undefined,
-        size: item.listing.size,
-        condition: item.listing.condition || 'very_good',
-        colors: item.listing.colors,
-        materials: item.listing.materials,
-        scrapedData: scrapedData ? {
-          title: scrapedData.title,
-          description: scrapedData.description,
-          price: scrapedData.extracted_price,
-          rating: scrapedData.rating,
-          reviews: scrapedData.reviews,
-        } : undefined,
-      });
-
       // Generate title: Use reverse search result first, then Vision API fallback
       let generatedTitle = productTitle; // From reverse image search
 
@@ -383,13 +440,12 @@ function App() {
         }
       }
 
-      // Update listing with product suggestions and detected size
+      // Update listing with product suggestions and detected size (NO description yet)
       handleUpdateListing(index, {
         title: item.listing.title || generatedTitle.trim(),
         brand: brand || item.listing.brand,
         category: category || item.listing.category,
         size: detectedSize || item.listing.size, // Auto-fill size from OCR if detected
-        description: descriptionResult.fullText,
         price: calculatedPrice,
         rrp: rrp > 0 ? rrp : undefined,
       });
@@ -409,7 +465,7 @@ function App() {
       alert('Auto-fill complete! ✨\n\n' +
         `Detected: ${brand || 'Unknown'} ${category || 'item'}\n` +
         (detectedSize ? `Size: ${detectedSize}\n` : '') +
-        (scrapedData ? 'Used Google Shopping data for description.' : ''));
+        '\nClick a product suggestion to generate description.');
     } catch (error) {
       console.error('Error auto-filling data:', error);
 

@@ -30,3 +30,8 @@ dist-ssr
 # Uploads
 src/assets/uploads/*
 !src/assets/uploads/.gitkeep
+
+# Environment variables
+.env
+.env.local
+.env.*.local

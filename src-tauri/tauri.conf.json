@@ -18,6 +18,8 @@
         "scope": [
           "https://serpapi.com/*",
           "https://vision.googleapis.com/*",
+          "https://www.google.com/*",
+          "https://www.google.co.uk/*",
           "https://*.asos.com/*",
           "https://*.johnlewis.com/*",
           "https://*.ebay.com/*",
