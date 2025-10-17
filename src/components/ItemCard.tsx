@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Listing } from '../types/listing';
 import { PhotoGroup } from '../services/photoGroupingService';
 import PhotoThumbnail from './PhotoThumbnail';
+import CategorySelectorModal from './CategorySelectorModal';
 
 interface ProductSuggestion {
   title: string;
@@ -48,8 +50,19 @@ export default function ItemCard({
   onDelete,
 }: ItemCardProps) {
   const { group, listing, isExpanded } = item;
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
   return (
+    <>
+      <CategorySelectorModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        onSelect={(categoryPath) => {
+          onUpdateListing(index, { vinted_category_path: categoryPath });
+        }}
+        currentValue={listing.vinted_category_path}
+      />
+
     <div className="bg-white rounded-lg shadow-md overflow-hidden">
       {/* Card Header */}
       <div className="p-6">
@@ -208,6 +221,13 @@ export default function ItemCard({
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
                   >
                     <option value="">Select a category...</option>
+                    {/* Show current selection if it's not in suggestions */}
+                    {listing.vinted_category_path &&
+                     !item.categorySuggestions.some(s => s.pathString === listing.vinted_category_path) && (
+                      <option value={listing.vinted_category_path}>
+                        {listing.vinted_category_path} (Selected)
+                      </option>
+                    )}
                     {item.categorySuggestions.map((suggestion, i) => (
                       <option key={i} value={suggestion.pathString}>
                         {suggestion.pathString} ({(suggestion.confidence * 100).toFixed(0)}% match)
@@ -216,18 +236,33 @@ export default function ItemCard({
                   </select>
                   {listing.vinted_category_path && (
                     <p className="text-xs text-green-600">
-                      ✨ Auto-selected top match - choose a different one if needed
+                      ✨ Category selected - change it if needed
                     </p>
                   )}
+                  <button
+                    onClick={() => setIsCategoryModalOpen(true)}
+                    className="text-sm text-teal-600 hover:text-teal-700 underline"
+                  >
+                    Browse all categories
+                  </button>
                 </div>
               ) : (
-                <input
-                  type="text"
-                  value={listing.vinted_category_path || ''}
-                  onChange={(e) => onUpdateListing(index, { vinted_category_path: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Type to enter category..."
-                />
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={listing.vinted_category_path || ''}
+                    onChange={(e) => onUpdateListing(index, { vinted_category_path: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Click browse to select category..."
+                    readOnly
+                  />
+                  <button
+                    onClick={() => setIsCategoryModalOpen(true)}
+                    className="text-sm text-teal-600 hover:text-teal-700 underline"
+                  >
+                    Browse all categories
+                  </button>
+                </div>
               )}
             </div>
 
@@ -582,5 +617,6 @@ export default function ItemCard({
         </div>
       )}
     </div>
+    </>
   );
 }
