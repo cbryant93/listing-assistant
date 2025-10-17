@@ -10,6 +10,13 @@ interface ProductSuggestion {
   link?: string;
 }
 
+interface CategorySuggestion {
+  path: string[];
+  confidence: number;
+  category: string;
+  pathString: string;
+}
+
 interface ItemData {
   group: PhotoGroup;
   listing: Partial<Listing>;
@@ -17,6 +24,8 @@ interface ItemData {
   isAnalyzing?: boolean;
   productSuggestions?: ProductSuggestion[];
   selectedProduct?: ProductSuggestion;
+  scrapedData?: any; // Store scraped data for description regeneration
+  categorySuggestions?: CategorySuggestion[];
 }
 
 interface ItemCardProps {
@@ -186,6 +195,42 @@ export default function ItemCard({
               />
             </div>
 
+            {/* Vinted Category (Dropdown with suggestions) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Vinted Category
+              </label>
+              {item.categorySuggestions && item.categorySuggestions.length > 0 ? (
+                <div className="space-y-2">
+                  <select
+                    value={listing.vinted_category_path || ''}
+                    onChange={(e) => onUpdateListing(index, { vinted_category_path: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select a category...</option>
+                    {item.categorySuggestions.map((suggestion, i) => (
+                      <option key={i} value={suggestion.pathString}>
+                        {suggestion.pathString} ({(suggestion.confidence * 100).toFixed(0)}% match)
+                      </option>
+                    ))}
+                  </select>
+                  {listing.vinted_category_path && (
+                    <p className="text-xs text-green-600">
+                      ✨ Auto-selected top match - choose a different one if needed
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={listing.vinted_category_path || ''}
+                  onChange={(e) => onUpdateListing(index, { vinted_category_path: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Type to enter category..."
+                />
+              )}
+            </div>
+
             {/* Size */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -209,16 +254,253 @@ export default function ItemCard({
                 Condition
               </label>
               <select
-                value={listing.condition || 'very_good'}
-                onChange={(e) => onUpdateListing(index, { condition: e.target.value as any })}
+                value={listing.condition || ''}
+                onChange={async (e) => {
+                  const newCondition = e.target.value as any;
+
+                  // Regenerate description if we have scraped data
+                  if (item.scrapedData && newCondition) {
+                    const { generateDescription } = await import('../services/aiDescriptionService');
+
+                    // Regenerate with the new condition
+                    const descriptionInput = {
+                      brand: listing.brand,
+                      category: listing.category,
+                      size: listing.size,
+                      condition: newCondition,
+                      rrp: listing.rrp,
+                      colors: listing.colors,
+                      materials: listing.materials,
+                      scrapedData: item.scrapedData, // Use stored scraped data
+                    };
+
+                    const descriptionResult = generateDescription(descriptionInput);
+                    // Update both condition and description together
+                    onUpdateListing(index, {
+                      condition: newCondition,
+                      description: descriptionResult.fullText
+                    });
+                  } else {
+                    // No scraped data, just update condition
+                    onUpdateListing(index, { condition: newCondition });
+                  }
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
               >
+                <option value="">Select condition...</option>
                 <option value="new_with_tags">New with tags</option>
                 <option value="new_without_tags">New without tags</option>
                 <option value="very_good">Very good</option>
                 <option value="good">Good</option>
                 <option value="satisfactory">Satisfactory</option>
               </select>
+            </div>
+
+            {/* Colors (up to 2) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Colors (up to 2)
+              </label>
+              <div className="space-y-2">
+                {/* Primary Color */}
+                <select
+                  value={listing.colors?.[0] || ''}
+                  onChange={(e) => {
+                    const newColors = [...(listing.colors || [])];
+                    if (e.target.value) {
+                      newColors[0] = e.target.value;
+                    } else {
+                      newColors.splice(0, 1);
+                    }
+                    onUpdateListing(index, { colors: newColors.filter(Boolean) });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Primary color...</option>
+                  <option value="black">Black</option>
+                  <option value="brown">Brown</option>
+                  <option value="grey">Grey</option>
+                  <option value="beige">Beige</option>
+                  <option value="pink">Pink</option>
+                  <option value="purple">Purple</option>
+                  <option value="red">Red</option>
+                  <option value="yellow">Yellow</option>
+                  <option value="blue">Blue</option>
+                  <option value="green">Green</option>
+                  <option value="orange">Orange</option>
+                  <option value="white">White</option>
+                  <option value="silver">Silver</option>
+                  <option value="gold">Gold</option>
+                  <option value="multi">Multi</option>
+                  <option value="khaki">Khaki</option>
+                  <option value="turquoise">Turquoise</option>
+                  <option value="cream">Cream</option>
+                  <option value="apricot">Apricot</option>
+                  <option value="coral">Coral</option>
+                  <option value="burgundy">Burgundy</option>
+                  <option value="rose">Rose</option>
+                  <option value="lilac">Lilac</option>
+                  <option value="light blue">Light blue</option>
+                  <option value="navy">Navy</option>
+                  <option value="dark green">Dark green</option>
+                  <option value="mustard">Mustard</option>
+                  <option value="mint">Mint</option>
+                  <option value="clear">Clear</option>
+                </select>
+
+                {/* Secondary Color (optional) */}
+                {listing.colors?.[0] && (
+                  <select
+                    value={listing.colors?.[1] || ''}
+                    onChange={(e) => {
+                      const newColors = [...(listing.colors || [])];
+                      if (e.target.value) {
+                        newColors[1] = e.target.value;
+                      } else {
+                        newColors.splice(1, 1);
+                      }
+                      onUpdateListing(index, { colors: newColors.filter(Boolean) });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Secondary color (optional)...</option>
+                    <option value="black">Black</option>
+                    <option value="brown">Brown</option>
+                    <option value="grey">Grey</option>
+                    <option value="beige">Beige</option>
+                    <option value="pink">Pink</option>
+                    <option value="purple">Purple</option>
+                    <option value="red">Red</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="blue">Blue</option>
+                    <option value="green">Green</option>
+                    <option value="orange">Orange</option>
+                    <option value="white">White</option>
+                    <option value="silver">Silver</option>
+                    <option value="gold">Gold</option>
+                    <option value="multi">Multi</option>
+                    <option value="khaki">Khaki</option>
+                    <option value="turquoise">Turquoise</option>
+                    <option value="cream">Cream</option>
+                    <option value="apricot">Apricot</option>
+                    <option value="coral">Coral</option>
+                    <option value="burgundy">Burgundy</option>
+                    <option value="rose">Rose</option>
+                    <option value="lilac">Lilac</option>
+                    <option value="light blue">Light blue</option>
+                    <option value="navy">Navy</option>
+                    <option value="dark green">Dark green</option>
+                    <option value="mustard">Mustard</option>
+                    <option value="mint">Mint</option>
+                    <option value="clear">Clear</option>
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {/* Materials (up to 3) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Materials (up to 3)
+              </label>
+              <div className="space-y-2">
+                {/* Material 1 */}
+                <select
+                  value={listing.materials?.[0] || ''}
+                  onChange={(e) => {
+                    const newMaterials = [...(listing.materials || [])];
+                    if (e.target.value) {
+                      newMaterials[0] = e.target.value;
+                    } else {
+                      newMaterials.splice(0, 1);
+                    }
+                    onUpdateListing(index, { materials: newMaterials.filter(Boolean) });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Primary material...</option>
+                  <option value="cotton">Cotton</option>
+                  <option value="polyester">Polyester</option>
+                  <option value="wool">Wool</option>
+                  <option value="leather">Leather</option>
+                  <option value="denim">Denim</option>
+                  <option value="silk">Silk</option>
+                  <option value="linen">Linen</option>
+                  <option value="nylon">Nylon</option>
+                  <option value="elastane">Elastane/Spandex</option>
+                  <option value="viscose">Viscose</option>
+                  <option value="acrylic">Acrylic</option>
+                  <option value="cashmere">Cashmere</option>
+                  <option value="synthetic">Synthetic</option>
+                  <option value="mixed">Mixed materials</option>
+                </select>
+
+                {/* Material 2 (optional) */}
+                {listing.materials?.[0] && (
+                  <select
+                    value={listing.materials?.[1] || ''}
+                    onChange={(e) => {
+                      const newMaterials = [...(listing.materials || [])];
+                      if (e.target.value) {
+                        newMaterials[1] = e.target.value;
+                      } else {
+                        newMaterials.splice(1, 1);
+                      }
+                      onUpdateListing(index, { materials: newMaterials.filter(Boolean) });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Secondary material (optional)...</option>
+                    <option value="cotton">Cotton</option>
+                    <option value="polyester">Polyester</option>
+                    <option value="wool">Wool</option>
+                    <option value="leather">Leather</option>
+                    <option value="denim">Denim</option>
+                    <option value="silk">Silk</option>
+                    <option value="linen">Linen</option>
+                    <option value="nylon">Nylon</option>
+                    <option value="elastane">Elastane/Spandex</option>
+                    <option value="viscose">Viscose</option>
+                    <option value="acrylic">Acrylic</option>
+                    <option value="cashmere">Cashmere</option>
+                    <option value="synthetic">Synthetic</option>
+                    <option value="mixed">Mixed materials</option>
+                  </select>
+                )}
+
+                {/* Material 3 (optional) */}
+                {listing.materials?.[1] && (
+                  <select
+                    value={listing.materials?.[2] || ''}
+                    onChange={(e) => {
+                      const newMaterials = [...(listing.materials || [])];
+                      if (e.target.value) {
+                        newMaterials[2] = e.target.value;
+                      } else {
+                        newMaterials.splice(2, 1);
+                      }
+                      onUpdateListing(index, { materials: newMaterials.filter(Boolean) });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Third material (optional)...</option>
+                    <option value="cotton">Cotton</option>
+                    <option value="polyester">Polyester</option>
+                    <option value="wool">Wool</option>
+                    <option value="leather">Leather</option>
+                    <option value="denim">Denim</option>
+                    <option value="silk">Silk</option>
+                    <option value="linen">Linen</option>
+                    <option value="nylon">Nylon</option>
+                    <option value="elastane">Elastane/Spandex</option>
+                    <option value="viscose">Viscose</option>
+                    <option value="acrylic">Acrylic</option>
+                    <option value="cashmere">Cashmere</option>
+                    <option value="synthetic">Synthetic</option>
+                    <option value="mixed">Mixed materials</option>
+                  </select>
+                )}
+              </div>
             </div>
 
             {/* Category */}
@@ -263,6 +545,24 @@ export default function ItemCard({
                 placeholder="0.00"
                 step="0.01"
               />
+            </div>
+
+            {/* Parcel Size */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Parcel Size
+              </label>
+              <select
+                value={listing.parcel_size || ''}
+                onChange={(e) => onUpdateListing(index, { parcel_size: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Select size...</option>
+                <option value="small">Small (e.g., accessories, t-shirts)</option>
+                <option value="medium">Medium (e.g., shirts, trousers)</option>
+                <option value="large">Large (e.g., shoes, jackets, coats)</option>
+                <option value="extra_large">Extra Large (e.g., winter coats, boots)</option>
+              </select>
             </div>
 
             {/* Description */}

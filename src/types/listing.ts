@@ -13,9 +13,10 @@ export interface Listing {
   title: string;
   description: string; // Includes hashtags
   category: string;
+  vinted_category_path?: string; // Full Vinted category path (e.g., "Women > Clothing > Tops & t-shirts > T-shirts")
   brand: string;
   size: string;
-  condition: 'new' | 'excellent' | 'good' | 'satisfactory';
+  condition: 'new_with_tags' | 'new_without_tags' | 'very_good' | 'good' | 'satisfactory';
   colors: string[]; // JSON array
   materials: string[]; // JSON array, max 3
   rrp: number; // Recommended Retail Price

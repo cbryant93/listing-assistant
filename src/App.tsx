@@ -12,8 +12,17 @@ interface ProductSuggestion {
   source: string;
   thumbnail?: string;
   link?: string; // Google Shopping URL
-  serpapi_product_api?: string; // SerpAPI endpoint for retailer URL
+  serpapi_product_api?: string; // SerpAPI Product endpoint URL
+  serpapi_immersive_product_api?: string; // SerpAPI Immersive Product endpoint URL
   product_id?: string;
+  immersive_product_page_token?: string; // Token for Immersive Product API
+}
+
+interface CategorySuggestion {
+  path: string[];
+  confidence: number;
+  category: string;
+  pathString: string; // Full path as string (e.g., "Men > Clothing > Tops")
 }
 
 interface ItemData {
@@ -23,6 +32,78 @@ interface ItemData {
   isAnalyzing?: boolean;
   productSuggestions?: ProductSuggestion[];
   selectedProduct?: ProductSuggestion; // Store selected product for description generation
+  scrapedData?: any; // Store scraped data for description regeneration
+  categorySuggestions?: CategorySuggestion[]; // Top category matches
+}
+
+/**
+ * Auto-detect parcel size based on category
+ */
+function detectParcelSize(category?: string): string {
+  if (!category) return '';
+
+  const cat = category.toLowerCase();
+
+  // Small items
+  if (cat.includes('accessory') || cat.includes('accessories') ||
+      cat.includes('belt') || cat.includes('scarf') ||
+      cat.includes('hat') || cat.includes('glove') ||
+      cat.includes('tie') || cat.includes('socks') ||
+      cat.includes('t-shirt') || cat.includes('tee') || cat.includes('top')) {
+    return 'small';
+  }
+
+  // Large items
+  if (cat.includes('shoe') || cat.includes('trainer') || cat.includes('sneaker') ||
+      cat.includes('boot') || cat.includes('jacket') || cat.includes('coat') ||
+      cat.includes('blazer') || cat.includes('hoodie')) {
+    return 'large';
+  }
+
+  // Extra large items
+  if (cat.includes('winter coat') || cat.includes('puffer') || cat.includes('parka')) {
+    return 'extra_large';
+  }
+
+  // Medium (default for most clothing)
+  return 'medium';
+}
+
+// Parse material string and extract up to 3 materials
+function parseMaterials(materialString?: string): string[] {
+  if (!materialString) return [];
+
+  const materials: string[] = [];
+  const text = materialString.toLowerCase();
+
+  // Material mapping to Vinted options
+  const materialMap: Record<string, string> = {
+    'cotton': 'cotton',
+    'polyester': 'polyester',
+    'wool': 'wool',
+    'leather': 'leather',
+    'denim': 'denim',
+    'silk': 'silk',
+    'linen': 'linen',
+    'nylon': 'nylon',
+    'elastane': 'elastane',
+    'spandex': 'elastane', // Map spandex to elastane
+    'viscose': 'viscose',
+    'acrylic': 'acrylic',
+    'cashmere': 'cashmere',
+    'synthetic': 'synthetic',
+  };
+
+  // Extract materials in order of appearance
+  for (const [keyword, material] of Object.entries(materialMap)) {
+    if (text.includes(keyword) && !materials.includes(material)) {
+      materials.push(material);
+      if (materials.length >= 3) break; // Max 3 materials
+    }
+  }
+
+  console.log('Parsed materials:', materialString, '→', materials);
+  return materials;
 }
 
 function App() {
@@ -71,7 +152,7 @@ function App() {
         listing: {
           title: '',
           description: '',
-          condition: 'very_good' as const,
+          condition: undefined, // No default - user must select
           colors: [],
           materials: [],
           rrp: 0,
@@ -107,7 +188,17 @@ function App() {
     console.log('Product selected:', product.title);
     console.log('Product URL:', product.link);
 
-    // Immediately update UI: fill title/RRP and hide dropdown
+    // Calculate price based on RRP
+    const { calculatePrice } = await import('./services/pricingService');
+    const rrp = product.price || 0;
+    let calculatedPrice = 10; // Default minimum
+    if (rrp > 0) {
+      const item = items[index];
+      const priceCalc = calculatePrice(rrp, item.listing.condition || 'very_good');
+      calculatedPrice = priceCalc.suggestedPrice;
+    }
+
+    // Immediately update UI: fill title/RRP/price and hide dropdown
     setItems(prevItems => prevItems.map((it, i) => {
       if (i === index) {
         return {
@@ -115,7 +206,8 @@ function App() {
           listing: {
             ...it.listing,
             title: product.title,
-            rrp: product.price || it.listing.rrp,
+            rrp: rrp > 0 ? rrp : undefined,
+            price: calculatedPrice,
           },
           selectedProduct: product,
           productSuggestions: undefined // Hide dropdown immediately
@@ -125,25 +217,55 @@ function App() {
     }));
 
     // Scrape product page and generate description (async, don't block UI)
-    if (product.product_id) {
+    if (product) {
       try {
-        const { getProductDetails } = await import('./services/googleShoppingService');
+        const { resolveRetailerUrl } = await import('./services/googleShoppingService');
         const { scrapeProductPage } = await import('./services/webScraperService');
         const { generateDescription } = await import('./services/aiDescriptionService');
 
-        // Get retailer URL from SerpAPI Product endpoint
-        console.log('Getting retailer URL from SerpAPI Product API...');
-        const productDetails = await getProductDetails(
-          product.product_id,
+        // Get retailer URL using 3-lane approach
+        console.log('🔄 Resolving retailer URL (3-lane approach)...');
+        const result = await resolveRetailerUrl(
+          product as any, // Cast to ProductData
           import.meta.env.VITE_SERPAPI_KEY
         );
 
-        const retailerUrl = productDetails.retailerUrl;
-        console.log(`Retailer URL: ${retailerUrl || 'Not found'}`);
+        const retailerUrl = result.retailerUrl;
+        console.log(`Retailer URL: ${retailerUrl || 'Not found'} (Lane ${result.lane || 'none'})`);
 
-        // Scrape retailer page if URL found
-        let scrapedData = {};
-        if (retailerUrl) {
+        // Use immersive product data if available (from Lane B), otherwise scrape
+        let scrapedData: any = {};
+
+        if (result.immersiveProductData) {
+          // Use description from Immersive Product API
+          console.log('✅ Using description from Immersive Product API');
+          scrapedData = {
+            description: result.immersiveProductData.description,
+            features: result.immersiveProductData.features,
+            title: result.immersiveProductData.title,
+            brand: result.immersiveProductData.brand,
+          };
+
+          // Also scrape retailer page for material composition (not in Immersive API)
+          if (retailerUrl) {
+            console.log('🔍 Scraping retailer page for material data...');
+            const retailerData = await scrapeProductPage(retailerUrl);
+            if (retailerData.material) {
+              scrapedData.material = retailerData.material;
+              console.log('✅ Found material:', retailerData.material);
+            } else {
+              // Fallback: Try extracting material from description text
+              console.log('⚠️ Could not scrape material, trying to extract from description...');
+              const descText = result.immersiveProductData.description || '';
+              const materialMatch = descText.match(/(\d+%\s*(?:cotton|polyester|wool|leather|elastane|nylon|viscose|acrylic|spandex|cashmere|denim|silk|linen)[^.]*)/i);
+              if (materialMatch) {
+                scrapedData.material = materialMatch[0];
+                console.log('✅ Extracted material from description:', scrapedData.material);
+              }
+            }
+          }
+        } else if (retailerUrl) {
+          // Fallback: scrape retailer page
           console.log(`✅ Found retailer URL: ${retailerUrl}`);
           console.log(`Scraping retailer page for product description...`);
           scrapedData = await scrapeProductPage(retailerUrl);
@@ -151,7 +273,50 @@ function App() {
           console.log('❌ No retailer URL found, will generate basic description');
         }
 
-        console.log('Scraped data:', scrapedData);
+        console.log('Product data:', scrapedData);
+
+        // Parse materials from scraped data
+        const scrapedMaterials = parseMaterials(scrapedData.material);
+
+        // Detect Vinted category using product title + scraped data + Vision labels
+        const categoryService = await import('./services/categoryMappingService');
+        const { findTopCategoryMatches, getCategoryPathString } = categoryService;
+
+        // Get current item to access Vision labels
+        const currentItem = items[index];
+
+        // Get Vision API labels (stored in item during auto-fill)
+        const visionLabels = currentItem.listing.category ? [currentItem.listing.category] : [];
+
+        // Detect gender from product title
+        const titleLower = product.title.toLowerCase();
+        let gender: 'men' | 'women' | undefined;
+        if (titleLower.includes("men's") || titleLower.includes('mens') || titleLower.match(/\bmen\b/)) {
+          gender = 'men';
+        } else if (titleLower.includes("women's") || titleLower.includes('womens') || titleLower.match(/\bwomen\b/)) {
+          gender = 'women';
+        }
+
+        // Extract keywords from product title for better matching
+        const titleKeywords = product.title.toLowerCase().split(/[\s-]+/).filter(w => w.length > 2);
+        visionLabels.push(...titleKeywords);
+
+        // Get top 5 category matches for dropdown
+        const categoryMatches = findTopCategoryMatches(visionLabels, gender, {
+          productTitle: product.title,
+          scrapedCategory: scrapedData.category,
+        }, 5);
+
+        const categorySuggestions: CategorySuggestion[] = categoryMatches.map(match => ({
+          path: match.path,
+          confidence: match.confidence,
+          category: match.category,
+          pathString: getCategoryPathString(match),
+        }));
+
+        // Auto-fill with top match
+        const vintedCategoryPath = categorySuggestions.length > 0 ? categorySuggestions[0].pathString : undefined;
+        console.log('🏷️ Top category suggestions:', categorySuggestions.map(s => `${s.pathString} (${(s.confidence * 100).toFixed(0)}%)`));
 
         // Get latest item state
         setItems(prevItems => {
@@ -162,9 +327,10 @@ function App() {
             brand: item.listing.brand,
             category: item.listing.category,
             size: item.listing.size,
-            condition: item.listing.condition || 'very_good',
+            condition: item.listing.condition, // Optional - only if user selected
+            rrp: item.listing.rrp, // Pass listing RRP
             colors: item.listing.colors,
-            materials: item.listing.materials,
+            materials: scrapedMaterials.length > 0 ? scrapedMaterials : item.listing.materials,
             scrapedData: scrapedData.description || scrapedData.features ? {
               title: scrapedData.title || product.title,
               description: scrapedData.description,
@@ -180,14 +346,18 @@ function App() {
 
           console.log('Generated description:', descriptionResult.fullText);
 
-          // Update description
+          // Update description AND store scraped data + category suggestions for future use
           return prevItems.map((it, i) => {
             if (i === index) {
               return {
                 ...it,
+                scrapedData, // Store for condition changes
+                categorySuggestions, // Store category suggestions for dropdown
                 listing: {
                   ...it.listing,
                   description: descriptionResult.fullText,
+                  materials: scrapedMaterials.length > 0 ? scrapedMaterials : it.listing.materials,
+                  vinted_category_path: vintedCategoryPath || it.listing.vinted_category_path,
                 },
               };
             }
@@ -264,11 +434,21 @@ function App() {
       const recognition = await analyzeMultipleImages(base64Images, import.meta.env.VITE_GOOGLE_VISION_API_KEY);
       console.log('Multi-image analysis result:', recognition);
 
-      const brand = item.listing.brand || recognition.brand || '';
+      // Capitalize brand name (first letter of each word)
+      const rawBrand = item.listing.brand || recognition.brand || '';
+      const brand = rawBrand
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+
+      // Don't detect category yet - will do it after product selection for better accuracy
+      // (using product title + scraped data + vision labels together)
+
       const category = item.listing.category || recognition.suggestedCategory || '';
       const productTitle = recognition.suggestedTitle;
       const smartQuery = recognition.smartQuery; // Smart query built from OCR + labels!
       const detectedSize = recognition.detectedSize; // Size extracted from clothing labels
+      const dominantColors = recognition.dominantColors; // Dominant colors detected from images (up to 2)
 
       // Step 2: Build simple, clean search queries
       console.log('Step 2: Building search queries...');
@@ -291,27 +471,151 @@ function App() {
       console.log('Smart query (with OCR keywords):', smartQuery);
 
       if (brand && goodLabels.length > 0) {
-        // Query 1: Use the smart query (includes OCR keywords like "taco", "graphic", etc.)
-        // e.g., "adidas running shirt taco"
+        // Extract keywords from BOTH smart query (OCR text) AND vision labels
+        // Smart query has specific keywords like "taco graphic running"
+        // Vision labels have generic keywords like "sleeve", "t-shirt", "sportswear"
+        const keywords = new Set<string>();
+
+        // First, add keywords from smart query (most specific!)
         if (smartQuery) {
-          queryVariations.push(smartQuery);
+          smartQuery.toLowerCase()
+            .replace(brand.toLowerCase(), '') // Remove brand name
+            .split(' ')
+            .forEach(word => {
+              if (word.length > 2 && !['the', 'and', 'for', 'with'].includes(word)) {
+                keywords.add(word);
+              }
+            });
         }
 
-        // Query 2: Brand + best label (simple fallback)
-        // e.g., "dickies sweater vest"
-        queryVariations.push(`${brand} ${goodLabels[0].label.toLowerCase()}`);
+        // Then add keywords from vision labels (fallback)
+        goodLabels.forEach(label => {
+          label.label.toLowerCase().split(' ').forEach(word => {
+            if (word.length > 2) {
+              keywords.add(word);
+            }
+          });
+        });
 
-        // Query 3: Brand + second label (alternative view)
-        // e.g., "dickies sleeveless shirt"
-        if (goodLabels.length >= 2) {
-          queryVariations.push(`${brand} ${goodLabels[1].label.toLowerCase()}`);
+        const keywordList = Array.from(keywords);
+        console.log('Extracted keywords:', keywordList);
+
+        // Normalize keywords (handle variations like "t-shirt" -> "tshirt", "polo-shirt" -> "polo shirt")
+        const normalizedKeywords = keywordList.map(k => {
+          // Remove hyphens for matching (but keep original for display)
+          const normalized = k.replace(/-/g, '');
+          return { original: k, normalized };
+        });
+
+        // Separate garment types from descriptors
+        const garmentTypes = ['vest', 'sweater', 'shirt', 'tshirt', 'tee', 'jacket', 'coat', 'dress', 'skirt', 'hoodie', 'cardigan', 'blazer', 'top', 'blouse', 'polo', 'jumper', 'pullover'];
+        const garmentWords = normalizedKeywords
+          .filter(k => garmentTypes.includes(k.normalized))
+          .map(k => k.original); // Use original keyword
+        const descriptorWords = normalizedKeywords
+          .filter(k => !garmentTypes.includes(k.normalized))
+          .map(k => k.original);
+
+        console.log('Garment words:', garmentWords);
+        console.log('Descriptor words:', descriptorWords);
+
+        // Valid compound garment types (these can be combined into ONE search term)
+        // Check for "t-shirt" as a single keyword or compounds like "sweater vest"
+        const validCompounds = [
+          ['sweater', 'vest'], // sweater vest
+          ['polo', 'shirt'],   // polo shirt
+          ['tank', 'top'],     // tank top
+        ];
+
+        // Check if we have a valid compound garment type
+        const compoundMatch = validCompounds.find(compound =>
+          compound.every(word => garmentWords.some(g => g.replace(/-/g, '') === word))
+        );
+
+        // Build realistic, descriptive search queries
+        // Strategy: Combine multiple descriptors for most specific search
+        const queries: string[] = [];
+
+        if (descriptorWords.length > 0 && garmentWords.length > 0) {
+          // Filter out generic/common descriptors
+          const genericDescriptors = ['active', 'sleeve', 'sportswear', 'clothing', 'apparel', 'fashion', 'textile'];
+          const specificDescriptors = descriptorWords.filter(d => !genericDescriptors.includes(d));
+          const fallbackDescriptors = descriptorWords.filter(d => genericDescriptors.includes(d));
+
+          // Use specific descriptors first (e.g., "taco", "graphic", "running")
+          const prioritizedDescriptors = [...specificDescriptors, ...fallbackDescriptors];
+
+          // If we have a valid compound (e.g., "sweater vest"), use it
+          if (compoundMatch) {
+            // Query 1: Brand + top 2 descriptors + compound
+            // e.g., "dickies sleeveless sweater vest"
+            const desc = prioritizedDescriptors.slice(0, 1).join(' ');
+            const query = `${brand.toLowerCase()} ${desc} ${compoundMatch.join(' ')}`;
+            queries.push(query);
+          }
+
+          // Query 1: Brand + top 2-3 specific descriptors + garment type
+          // e.g., "adidas taco graphic t-shirt" (very specific!)
+          if (specificDescriptors.length >= 2) {
+            const desc = specificDescriptors.slice(0, 2).join(' '); // Combine top 2 descriptors
+            const query1 = `${brand.toLowerCase()} ${desc} ${garmentWords[0]}`;
+            queries.push(query1);
+          }
+
+          // Query 2: Brand + first specific descriptor + garment type
+          // e.g., "adidas taco t-shirt"
+          if (specificDescriptors.length > 0) {
+            const query2 = `${brand.toLowerCase()} ${specificDescriptors[0]} ${garmentWords[0]}`;
+            if (!queries.includes(query2)) {
+              queries.push(query2);
+            }
+          }
+
+          // Query 3: Brand + second specific descriptor + garment type
+          // e.g., "adidas graphic t-shirt"
+          if (specificDescriptors.length > 1) {
+            const query3 = `${brand.toLowerCase()} ${specificDescriptors[1]} ${garmentWords[0]}`;
+            if (!queries.includes(query3)) {
+              queries.push(query3);
+            }
+          }
+
+          // Query 4: Brand + first descriptor (any) + second garment type
+          // e.g., "adidas taco shirt"
+          if (garmentWords.length > 1) {
+            const query4 = `${brand.toLowerCase()} ${prioritizedDescriptors[0]} ${garmentWords[1]}`;
+            if (!queries.includes(query4)) {
+              queries.push(query4);
+            }
+          }
+
+          // Fallback: If no specific descriptors, use generic ones
+          if (queries.length === 0) {
+            const query = `${brand.toLowerCase()} ${prioritizedDescriptors[0]} ${garmentWords[0]}`;
+            queries.push(query);
+          }
+        } else if (descriptorWords.length > 0) {
+          // No garment words, just use descriptors with brand
+          const topDescriptors = descriptorWords.slice(0, 3);
+          topDescriptors.forEach(desc => {
+            queries.push(`${brand.toLowerCase()} ${desc}`);
+          });
+        } else {
+          // Fallback: No descriptor words, use full labels
+          // Query 1: Brand + first full label
+          const query1 = `${brand.toLowerCase()} ${goodLabels[0].label.toLowerCase()}`;
+          queries.push(query1);
+
+          // Query 2: Brand + second full label
+          if (goodLabels.length >= 2) {
+            const query2 = `${brand.toLowerCase()} ${goodLabels[1].label.toLowerCase()}`;
+            if (!queries.includes(query2)) {
+              queries.push(query2);
+            }
+          }
         }
 
-        // Query 4: Brand + top 2 labels combined (more specific)
-        // e.g., "dickies sweater vest sleeveless shirt"
-        if (goodLabels.length >= 2) {
-          queryVariations.push(`${brand} ${goodLabels[0].label.toLowerCase()} ${goodLabels[1].label.toLowerCase()}`);
-        }
+        queryVariations.push(...queries);
       }
 
       console.log('Running queries:', queryVariations);
@@ -344,8 +648,10 @@ function App() {
                 source: `${product.source || 'Google Shopping'} (${query})`,
                 thumbnail: product.thumbnail,
                 link: product.link,
-                serpapi_product_api: product.serpapi_product_api, // For getting retailer URL
+                serpapi_product_api: product.serpapi_product_api, // Pre-built Product API URL
+                serpapi_immersive_product_api: product.serpapi_immersive_product_api, // Pre-built Immersive API URL
                 product_id: product.product_id,
+                immersive_product_page_token: product.immersive_product_page_token,
               });
               existingTitles.add(titleLower);
             }
@@ -428,26 +734,31 @@ function App() {
           const capitalizedCategory = category.charAt(0).toUpperCase() + category.slice(1);
           generatedTitle = `${brand} ${capitalizedCategory}`;
         } else if (brand) {
-          const topLabel = recognition.labels[0];
+          const topLabel = recognition.topLabels[0]?.label;
           const capitalizedLabel = topLabel ? topLabel.charAt(0).toUpperCase() + topLabel.slice(1) : '';
           generatedTitle = `${brand} ${capitalizedLabel}`;
         } else if (category) {
           const capitalizedCategory = category.charAt(0).toUpperCase() + category.slice(1);
           generatedTitle = capitalizedCategory;
         } else {
-          const topLabels = recognition.labels.slice(0, 2).map(l => l.charAt(0).toUpperCase() + l.slice(1)).join(' ');
+          const topLabels = recognition.topLabels.slice(0, 2).map(l => l.label.charAt(0).toUpperCase() + l.label.slice(1)).join(' ');
           generatedTitle = topLabels || 'Clothing Item';
         }
       }
 
-      // Update listing with product suggestions and detected size (NO description yet)
+      // Auto-detect parcel size based on category
+      const parcelSize = detectParcelSize(category);
+
+      // Update listing with product suggestions and detected size (NO description, price, or RRP, or category yet)
       handleUpdateListing(index, {
         title: item.listing.title || generatedTitle.trim(),
         brand: brand || item.listing.brand,
         category: category || item.listing.category,
+        // vinted_category_path will be set after product selection for better accuracy
         size: detectedSize || item.listing.size, // Auto-fill size from OCR if detected
-        price: calculatedPrice,
-        rrp: rrp > 0 ? rrp : undefined,
+        colors: dominantColors.length > 0 ? dominantColors : item.listing.colors, // Auto-fill detected colors (up to 2)
+        parcel_size: parcelSize || item.listing.parcel_size, // Auto-detect parcel size
+        // Don't set price, RRP, or Vinted category until user selects a product
       });
 
       // Update item with product suggestions and clear analyzing state
