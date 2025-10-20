@@ -3,8 +3,11 @@ import { open } from '@tauri-apps/api/dialog';
 import { invoke } from '@tauri-apps/api/tauri';
 import { PhotoGroup } from './services/photoGroupingService';
 import { Listing } from './types/listing';
+import { PhotoCluster } from './services/photoClusteringService';
 import UploadScreen from './components/UploadScreen';
 import ItemCard from './components/ItemCard';
+import MassUploadScreen from './components/MassUploadScreen';
+import ClusterReviewScreen from './components/ClusterReviewScreen';
 
 interface ProductSuggestion {
   title: string;
@@ -109,6 +112,11 @@ function parseMaterials(materialString?: string): string[] {
 function App() {
   const [items, setItems] = useState<ItemData[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [screen, setScreen] = useState<'upload' | 'mass-upload' | 'cluster-review' | 'items'>('upload');
+  const [clusters, setClusters] = useState<PhotoCluster[]>([]);
+
+  // API key from environment or hardcoded for now
+  const apiKey = import.meta.env.VITE_GOOGLE_VISION_API_KEY || '';
 
   const handleUploadPhotos = async () => {
     try {
@@ -163,6 +171,7 @@ function App() {
 
       console.log('Created items:', newItems);
       setItems(newItems);
+      setScreen('items');
       setIsProcessing(false);
       console.log('Upload complete!');
     } catch (error) {
@@ -170,6 +179,50 @@ function App() {
       alert('Error uploading photos: ' + (error as Error).message);
       setIsProcessing(false);
     }
+  };
+
+  const handleMassUpload = () => {
+    setScreen('mass-upload');
+  };
+
+  const handleClustersReady = (readyClusters: PhotoCluster[]) => {
+    setClusters(readyClusters);
+    setScreen('cluster-review');
+  };
+
+  const handleConfirmClusters = (confirmedClusters: PhotoCluster[]) => {
+    // Convert clusters to items
+    const newItems: ItemData[] = confirmedClusters.map((cluster, index) => {
+      // Convert cluster photos to PhotoGroup format
+      const photoGroup: PhotoGroup = {
+        id: cluster.id,
+        photos: cluster.photos.map(p => p.path),
+        primaryPhoto: cluster.photos.find(p => p.id === cluster.coverPhotoId)?.path || cluster.photos[0].path,
+        confidence: cluster.confidence,
+      };
+
+      return {
+        group: photoGroup,
+        listing: {
+          title: cluster.suggestedTitle || '',
+          description: '',
+          condition: undefined,
+          colors: [],
+          materials: [],
+          rrp: 0,
+          price: 0,
+        },
+        isExpanded: false,
+      };
+    });
+
+    setItems([...items, ...newItems]);
+    setScreen('items');
+    setClusters([]);
+  };
+
+  const handleBackToUpload = () => {
+    setScreen(items.length > 0 ? 'items' : 'upload');
   };
 
   const handleToggleExpand = (index: number) => {
@@ -429,8 +482,26 @@ function App() {
         base64Images.push(base64Image);
       }
 
-      // Step 1: Analyze ALL photos with Vision API for brand/category/labels
-      console.log('Step 1: Analyzing all images with Google Vision API...');
+      // Step 1: Try Google Lens reverse image search first (most accurate!)
+      console.log('Step 1: Searching Google Lens with primary photo...');
+      const { searchGoogleLens, getBestProduct } = await import('./services/googleLensService');
+
+      let lensProduct = null;
+      let lensResult: any = null;
+      try {
+        // Use Google Cloud Storage with signed URLs for image hosting
+        lensResult = await searchGoogleLens(
+          base64Images[0],
+          import.meta.env.VITE_SERPAPI_KEY,
+          import.meta.env.VITE_GCS_BUCKET_NAME // Use GCS with service account authentication
+        );
+        console.log('Google Lens raw results:', lensResult.visualMatches?.length || 0, 'visual matches');
+      } catch (error) {
+        console.warn('Google Lens failed, continuing with Vision API:', error);
+      }
+
+      // Step 2: Analyze ALL photos with Vision API for brand/category/labels (supplement)
+      console.log('Step 2: Analyzing all images with Google Vision API...');
       const recognition = await analyzeMultipleImages(base64Images, import.meta.env.VITE_GOOGLE_VISION_API_KEY);
       console.log('Multi-image analysis result:', recognition);
 
@@ -441,6 +512,13 @@ function App() {
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
 
+      // Now that we have the brand, re-rank Google Lens results with brand hint
+      if (lensResult) {
+        lensProduct = getBestProduct(lensResult, brand);
+        console.log('Google Lens best product (brand-aware):', lensProduct?.title || 'No match');
+        console.log('  Source:', lensProduct?.source || 'N/A');
+      }
+
       // Don't detect category yet - will do it after product selection for better accuracy
       // (using product title + scraped data + vision labels together)
 
@@ -450,11 +528,22 @@ function App() {
       const detectedSize = recognition.detectedSize; // Size extracted from clothing labels
       const dominantColors = recognition.dominantColors; // Dominant colors detected from images (up to 2)
 
-      // Step 2: Build simple, clean search queries
-      console.log('Step 2: Building search queries...');
+      // Step 3: Build simple, clean search queries
+      console.log('Step 3: Building search queries...');
       const { searchGoogleShopping } = await import('./services/googleShoppingService');
 
       const queryVariations: string[] = [];
+
+      // If Google Lens found a product, use it as the primary query!
+      if (lensProduct && lensProduct.title) {
+        console.log('Using Google Lens product as primary query:', lensProduct.title);
+        queryVariations.push(lensProduct.title.toLowerCase());
+
+        // Also add a brand-specific version if we detected a brand
+        if (brand && !lensProduct.title.toLowerCase().includes(brand.toLowerCase())) {
+          queryVariations.push(`${brand.toLowerCase()} ${lensProduct.title.toLowerCase()}`);
+        }
+      }
 
       // Get top 2-3 non-color, non-generic labels from Vision API (they're already good!)
       const colors = ['white', 'black', 'red', 'blue', 'grey', 'gray', 'green', 'yellow'];
@@ -673,6 +762,48 @@ function App() {
         }
       }
 
+      // Add Google Lens visual matches to product suggestions (prioritize these!)
+      // Use smart selector to prioritize real retailers over marketplaces
+      if (lensResult?.visualMatches && lensResult.visualMatches.length > 0) {
+        const lensSelector = await import('./services/lensProductSelector');
+        const topLensPages = lensSelector.pickProductPagesFromLens(lensResult.visualMatches, {
+          brand, // Use detected brand for better ranking
+          take: 10, // Get top 10 retailer pages
+        });
+
+        console.log(`Adding ${topLensPages.length} top Google Lens matches (retailers prioritized)...`);
+        const existingTitles = new Set(productSuggestions.map(s => s.title.toLowerCase()));
+
+        topLensPages.forEach((match: any) => {
+          const titleLower = (match.title || '').toLowerCase();
+          if (titleLower && !existingTitles.has(titleLower)) {
+            // Parse price from string like "£49.99" or "$25.00"
+            let extractedPrice: number | undefined;
+            if (match.price && typeof match.price === 'string') {
+              const priceMatch = match.price.match(/[\d,.]+/);
+              if (priceMatch) {
+                extractedPrice = parseFloat(priceMatch[0].replace(',', ''));
+              }
+            } else if (typeof match.price === 'number') {
+              extractedPrice = match.price;
+            }
+
+            productSuggestions.unshift({ // Add to FRONT (prioritize Lens results!)
+              title: match.title,
+              price: extractedPrice,
+              source: `${match.source} (Google Lens - Retailer)`,
+              thumbnail: match.thumbnail,
+              link: match.link,
+            });
+            existingTitles.add(titleLower);
+
+            if (extractedPrice) {
+              allPrices.push(extractedPrice);
+            }
+          }
+        });
+      }
+
       // Calculate median RRP from ALL results across all queries
       if (allPrices.length > 0) {
         const sortedPrices = [...allPrices].sort((a, b) => a - b);
@@ -725,8 +856,8 @@ function App() {
         calculatedPrice = priceCalc.suggestedPrice;
       }
 
-      // Generate title: Use reverse search result first, then Vision API fallback
-      let generatedTitle = productTitle; // From reverse image search
+      // Generate title: Prioritize Google Lens > productTitle > Vision API fallback
+      let generatedTitle = lensProduct?.title || productTitle;
 
       if (!generatedTitle) {
         // Fallback to Vision API detection
@@ -774,8 +905,10 @@ function App() {
       setIsProcessing(false);
 
       alert('Auto-fill complete! ✨\n\n' +
+        (lensProduct ? `Google Lens found: ${lensProduct.title}\n\n` : '') +
         `Detected: ${brand || 'Unknown'} ${category || 'item'}\n` +
         (detectedSize ? `Size: ${detectedSize}\n` : '') +
+        `\nFound ${productSuggestions.length} product suggestions\n` +
         '\nClick a product suggestion to generate description.');
     } catch (error) {
       console.error('Error auto-filling data:', error);
@@ -799,6 +932,27 @@ function App() {
     alert('Phase 3: Upload to Vinted coming soon! 🚀');
   };
 
+  // Render different screens based on state
+  if (screen === 'mass-upload') {
+    return (
+      <MassUploadScreen
+        apiKey={apiKey}
+        onClustersReady={handleClustersReady}
+        onBack={handleBackToUpload}
+      />
+    );
+  }
+
+  if (screen === 'cluster-review') {
+    return (
+      <ClusterReviewScreen
+        clusters={clusters}
+        onConfirm={handleConfirmClusters}
+        onBack={handleBackToUpload}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
@@ -814,6 +968,7 @@ function App() {
         {items.length === 0 ? (
           <UploadScreen
             onUpload={handleUploadPhotos}
+            onMassUpload={handleMassUpload}
             isProcessing={isProcessing}
           />
         ) : (

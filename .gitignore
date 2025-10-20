@@ -35,3 +35,7 @@ src/assets/uploads/*
 .env
 .env.local
 .env.*.local
+
+# Google Cloud service account credentials
+google-service-account.json
+*-service-account.json
